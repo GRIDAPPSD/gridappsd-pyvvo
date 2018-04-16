@@ -102,7 +102,8 @@ def main(fdrid='_9CE150A8-8CC5-A0F9-B67E-BBD8C79D3095'):
                                    outDir=outDir,
                                    reg=reg, cap=cap,
                                    costs=config['COSTS'],
-                                   probabilities=config['PROBABILITIES'])
+                                   probabilities=config['PROBABILITIES'],
+                                   gldPath=config['GLD-PATH'])
     
     bestInd = popObj.ga()
     

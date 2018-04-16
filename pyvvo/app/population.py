@@ -31,7 +31,8 @@ class population:
                                   'cross': 0.7, 'capMutate': 0.1,
                                   'regMutate': 0.05},
                  baseControlFlag=None,
-                 randomSeed=None):
+                 randomSeed=None,
+                 gldPath=None):
         """Initialize a population of individuals.
         
         INPUTS:
@@ -79,6 +80,7 @@ class population:
                 to an individual's constructor for details.
             randomSeed: integer to seed the random number generator. Python is
                 smart enough to seed for all modules below.
+            gldPath: path to GridLAB-D installation to use.
         """
         # Seed the random number generator.
         random.seed(randomSeed)
@@ -115,6 +117,9 @@ class population:
         
         # Track the baseControlFlag
         self.baseControlFlag = baseControlFlag
+        
+        # GridLAB-D path
+        self.gldPath = gldPath
         
         # Initialize queues and threads for running GLD models in parallel and
         # cleaning up models we're done with.
@@ -170,7 +175,8 @@ class population:
                           'stoptime': self.stoptime,
                           'timezone': self.timezone,
                           'dbObj': self.dbObj,
-                          'recorders': self.recorders}
+                          'recorders': self.recorders,
+                          'gldPath': self.gldPath}
         
         # If the population includes a 'baseline' model, we need to track it.
         # TODO: May want to update this to track multiple baseline individuals

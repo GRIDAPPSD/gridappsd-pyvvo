@@ -140,6 +140,8 @@ class individual:
                 *NOTE: capacitors will NOT be recorded if the controlFlag is 0,
                     as there is no need to track status/switch count.
                 *NOTE: all capacitors should use the same table.
+            
+            gldPath: path to GridLAB-D installation
         """
         # Ensure flags are compatible.
         if controlFlag:

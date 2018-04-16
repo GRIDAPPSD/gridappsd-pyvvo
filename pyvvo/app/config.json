@@ -24,6 +24,7 @@
 	"SAMPLE": 60,
 	"OPTIMIZATION": 3600
   },
+  "GLD-PATH": "C:/gridlab-d/builds/feature/1060",
   "GLD-DB": {
     "database": "pyvvo",
     "user": "pyvvo",
