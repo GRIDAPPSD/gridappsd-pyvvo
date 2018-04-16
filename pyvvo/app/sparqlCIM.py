@@ -5,7 +5,7 @@ Created on Mar 1, 2018
 '''
 from SPARQLWrapper import SPARQLWrapper2, SPARQLWrapper
 from collections import OrderedDict
-from util.helper import binaryWidth
+from helper import binaryWidth
 
 # Define query prefix
 PREFIX = """

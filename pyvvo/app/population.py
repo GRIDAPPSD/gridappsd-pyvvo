@@ -13,9 +13,9 @@ import sys
 import copy
 
 # pyvvo
-from genetic.individual import individual, CAPSTATUS
-from genetic import populationManager
-import util.helper
+from individual import individual, CAPSTATUS
+import populationManager
+import helper
 
 class population:
 
@@ -303,7 +303,7 @@ class population:
                                      'reg': copy.deepcopy(bInd.reg)}
                 # Get a well formatted string representation
                 self.baselineData['str'] = \
-                    util.helper.getSummaryStr(costs=self.baselineData['costs'],
+                    helper.getSummaryStr(costs=self.baselineData['costs'],
                                               reg=self.baselineData['reg'],
                                               cap=self.baselineData['cap'])
             

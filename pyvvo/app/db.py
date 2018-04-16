@@ -11,8 +11,8 @@ Created on Aug 29, 2017
 import mysql.connector
 import mysql.connector.pooling as pooling
 from mysql.connector import errorcode
-from util import helper
-from util import constants
+import helper
+import constants
 import time
 import datetime
 from itertools import chain

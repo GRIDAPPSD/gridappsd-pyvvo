@@ -71,7 +71,7 @@ Created on Aug 29, 2017
 """
 import subprocess
 import os
-import util.helper
+import helper
 
 # definitions for regulator and capacitor properties
 REG_CHANGE_PROPS = ['tap_A_change_count', 'tap_B_change_count',
@@ -234,7 +234,7 @@ def computeCosts(dbObj, energyTable, powerTable, triplexTable, tapChangeCount,
     
     # Loop over each row, compute power factor, and assign cost
     for p in power:
-        pf, direction = util.helper.powerFactor(p)
+        pf, direction = helper.powerFactor(p)
          
         # Construct the field. Note that the possible returns of direction are
         # 'lead' and 'lag'

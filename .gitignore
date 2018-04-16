@@ -2,7 +2,6 @@
 __pycache__/
 *.py[cod]
 
-# Mr Developer
-#.mr.developer.cfg
-#.project
-#.pydevproject
+# pydev
+.project
+.pydevproject

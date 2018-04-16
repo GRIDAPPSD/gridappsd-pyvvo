@@ -15,19 +15,19 @@ import os
 import sys
 
 # Get this directory.
-thisDir = os.path.dirname(os.path.realpath(__file__))
-
-# pyvvo imports:
-from cim import sparqlCIM
-from util import db
-from glm import modGLM
-from genetic import population
-import constants as CONST
-from util.helper import clock
+THISDIR = os.path.dirname(os.path.realpath(__file__))
 
 # If this directory isn't on Python's path, add it
-if thisDir not in sys.path:
-    sys.path.append(thisDir)
+if THISDIR not in sys.path:
+    sys.path.insert(0, THISDIR)
+
+# pyvvo imports:
+import sparqlCIM
+import db
+import modGLM
+import population
+import constants as CONST
+from helper import clock
     
 def main(fdrid='_9CE150A8-8CC5-A0F9-B67E-BBD8C79D3095'):
     """Main function.
@@ -106,12 +106,13 @@ def main(fdrid='_9CE150A8-8CC5-A0F9-B67E-BBD8C79D3095'):
     
     bestInd = popObj.ga()
     
+    print(bestInd)
     print('hoorah')
     
 def readConfig():
     """Helper function to read pyvvo configuration file.
     """
-    with open(os.path.join(thisDir, 'config.json')) as c:
+    with open(os.path.join(THISDIR, 'config.json')) as c:
         config = json.load(c)    
     
     return config

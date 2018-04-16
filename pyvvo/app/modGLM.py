@@ -12,7 +12,7 @@ Created on Jul 27, 2017
 
 import re
 import os
-import util.helper
+import helper
 import csv
 
 # Time formatting:
@@ -1349,7 +1349,7 @@ class modGLM:
         """
         # First, get time information. This function will error if interval
         # isn't proper. Pretty rudiemntary for now, but hey, it'll work :)
-        t = util.helper.timeInfoForZIP(starttime=starttime, stoptime=stoptime)
+        t = helper.timeInfoForZIP(starttime=starttime, stoptime=stoptime)
         
         if not avgFlag:
             

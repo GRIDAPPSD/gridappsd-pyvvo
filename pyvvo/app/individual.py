@@ -6,10 +6,10 @@ Created on Aug 9, 2017
 @author: thay838
 """
 import random
-from glm import modGLM
-import util.gld
-import util.helper
-import util.constants
+import modGLM
+import gld
+import helper
+import constants
 import os
 import copy
 
@@ -207,9 +207,9 @@ class individual:
         """
         # Assing times.
         self.starttime = starttime
-        self.start_str = starttime.strftime(util.constants.DATE_TZ_FMT)
+        self.start_str = starttime.strftime(constants.DATE_TZ_FMT)
         self.stoptime = stoptime
-        self.stop_str = stoptime.strftime(util.constants.DATE_TZ_FMT)
+        self.stop_str = stoptime.strftime(constants.DATE_TZ_FMT)
         # Full path to output model.
         self.modelPath = None
         
@@ -221,7 +221,7 @@ class individual:
         
         # Update the 'prevState' of the individuals reg and cap dictionaries.
         if reg and cap:
-            out = util.helper.updateVVODicts(regOld=self.reg, capOld=self.cap,
+            out = helper.updateVVODicts(regOld=self.reg, capOld=self.cap,
                                              regNew=reg, capNew=cap)
             
             self.reg = out['reg']
@@ -258,7 +258,7 @@ class individual:
         This is a simple wrapper to call helper.getSummaryStr since the
         benchmark system should be displayed in the same way.
         """
-        s = util.helper.getSummaryStr(costs=self.costs, reg=self.reg,
+        s = helper.getSummaryStr(costs=self.costs, reg=self.reg,
                                       cap=self.cap, regChrom=self.regChrom,
                                       capChrom=self.capChrom,
                                       parents=self.parents)
@@ -299,7 +299,7 @@ class individual:
             
             # Compute the needed field width to represent the upper tap bound
             # Use + 1 to account for 2^0
-            width = util.helper.binaryWidth(tb) 
+            width = helper.binaryWidth(tb) 
             
             # Define variables as needed based on the flag. I started to try to
             # make micro-optimizations for code factoring, but let's go for
@@ -326,7 +326,7 @@ class individual:
                     
                     # Translate previous position to integer on interval [0,tb]
                     prevState = \
-                        util.gld.inverseTranslateTaps(lowerTaps=v['lower_taps'],
+                        gld.inverseTranslateTaps(lowerTaps=v['lower_taps'],
                                                  pos=phaseData['prevState'])
                         
                     # Initialize the newState for while loop.
@@ -343,7 +343,7 @@ class individual:
                 elif (flag == 3) or (flag == 4):
                     # Translate position to integer on interval [0, tb]
                     newState = \
-                        util.gld.inverseTranslateTaps(lowerTaps=v['lower_taps'],
+                        gld.inverseTranslateTaps(lowerTaps=v['lower_taps'],
                                                       pos=phaseData[state])
                         
                 elif flag == 5:
@@ -362,7 +362,7 @@ class individual:
                 
                 # Translate newState for GridLAB-D.
                 self.reg[r]['phases'][phase]['newState'] = \
-                    util.gld.translateTaps(lowerTaps=v['lower_taps'], pos=newState)
+                    gld.translateTaps(lowerTaps=v['lower_taps'], pos=newState)
                     
                 # Increment the tap change counter (previous pos - this pos) if
                 # this individual is using MANUAL control. Otherwise, tap
@@ -552,11 +552,11 @@ class individual:
                                   phaseData['chromInd'][1]]
                     
                 # Convert the binary to an integer
-                posInt = util.helper.bin2int(tapBin)
+                posInt = helper.bin2int(tapBin)
                 
                 # Convert integer to tap position and assign to new position
                 self.reg[r]['phases'][phase]['newState'] = \
-                    util.gld.translateTaps(lowerTaps=self.reg[r]['lower_taps'],
+                    gld.translateTaps(lowerTaps=self.reg[r]['lower_taps'],
                                       pos=posInt)
                     
                 # Increment the tap change counter (previous pos - this pos)
@@ -660,7 +660,7 @@ class individual:
                 recordDict = {'objType': 'recorder'}
                 # Get the dictionary of properties
                 recordDict['properties'] = \
-                    util.gld.getRegOrCapRecordDict(objName=reg,
+                    gld.getRegOrCapRecordDict(objName=reg,
                                                    table='reg',
                                                    objType='reg',
                                                    timeInterval=tInt,
@@ -678,7 +678,7 @@ class individual:
                 recordDict = {'objType': 'recorder'}
                 # Get the dictionary of properties
                 recordDict['properties'] = \
-                    util.gld.getRegOrCapRecordDict(objName=cap,
+                    gld.getRegOrCapRecordDict(objName=cap,
                                                    table='cap',
                                                    objType='cap',
                                                    timeInterval=tInt,
@@ -732,7 +732,7 @@ class individual:
     def runModel(self):
         """Function to run GridLAB-D model.
         """
-        self.modelOutput = util.gld.runModel(modelPath=(self.outDir + '/'
+        self.modelOutput = gld.runModel(modelPath=(self.outDir + '/'
                                                         + self.modelPath),
                                              gldPath=self.gldPath)
         # TODO: Handle a failed GridLAB-D run (catch a CalledProcessError)
@@ -768,13 +768,13 @@ class individual:
         # change count at the end - otherwise we might double count.
         self.tapChangeCount = \
             self.dbObj.sumMatrix(table=self.regTable['table'],
-                                 cols=util.gld.REG_CHANGE_PROPS,
+                                 cols=gld.REG_CHANGE_PROPS,
                                  starttime=stoptime,
                                  stoptime=stoptime)
         # Update the capacitor switch count
         self.capSwitchCount = \
             self.dbObj.sumMatrix(table=self.capTable['table'],
-                                 cols=util.gld.CAP_CHANGE_PROPS,
+                                 cols=gld.CAP_CHANGE_PROPS,
                                  starttime=stoptime,
                                  stoptime=stoptime)
         
@@ -783,13 +783,13 @@ class individual:
         self.reg = \
             self.dbObj.updateStatus(inDict=self.reg, dictType='reg',
                                     table=self.regTable['table'],
-                                    phaseCols=util.gld.REG_STATE_PROPS,
+                                    phaseCols=gld.REG_STATE_PROPS,
                                     t=stoptime)
         
         self.cap = \
             self.dbObj.updateStatus(inDict=self.cap, dictType='cap',
                                     table=self.capTable['table'],
-                                    phaseCols=util.gld.CAP_STATE_PROPS,
+                                    phaseCols=gld.CAP_STATE_PROPS,
                                     t=stoptime)
         
         # Update the regulator and capacitor chromosomes.
@@ -798,7 +798,7 @@ class individual:
                             
     def evalFitness(self, costs, tCol='t', starttime=None, stoptime=None):
         """Function to evaluate fitness of individual. This is essentially a
-            wrapper to call util.gld.computeCosts
+            wrapper to call gld.computeCosts
         
         INPUTS:
             costs: dictionary with the following fields:
@@ -819,7 +819,7 @@ class individual:
             stoptime = self.stoptime
 
         # Compute costs.
-        self.costs = util.gld.computeCosts(dbObj=self.dbObj,
+        self.costs = gld.computeCosts(dbObj=self.dbObj,
                                            energyTable=self.energyTable,
                                            powerTable=self.powerTable,
                                            triplexTable=self.triplexTable,

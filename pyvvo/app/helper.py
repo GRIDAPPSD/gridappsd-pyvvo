@@ -9,7 +9,7 @@ import math
 import re
 import datetime
 import dateutil.tz
-import util.constants
+import constants
 import copy
 
 # Compile some regular expressions for detection of complex number forms
@@ -201,7 +201,7 @@ def tsToDT(ts, timezone=None):
     """
     # Check if the string came with a timezone. If so, infer both timezone and
     # daylight savings time
-    tzMatch = util.constants.TZ_EXP.search(ts)
+    tzMatch = constants.TZ_EXP.search(ts)
     
     # We're overdefined if the timestamp has a tz, and the timezone was given
     if tzMatch and timezone:
@@ -217,17 +217,17 @@ def tsToDT(ts, timezone=None):
         # Extract the match
         tzStr = tzMatch.group()
         if tzStr[0] == 'E':
-            tz = util.constants.TZ['EST5EDT']
+            tz = constants.TZ['EST5EDT']
         elif tzStr[0] == 'C':
-            tz = util.constants.TZ['CST6CDT']
+            tz = constants.TZ['CST6CDT']
         elif tzStr[0] == 'M':
-            tz = util.constants.TZ['MST7MDT']
+            tz = constants.TZ['MST7MDT']
         elif tzStr[0] == 'P':
-            tz = util.constants.TZ['PST8PDT']
+            tz = constants.TZ['PST8PDT']
         elif tzStr[0] == 'A':
-            tz = util.constants.TZ['AST9ADT']
+            tz = constants.TZ['AST9ADT']
         elif tzStr[0] == 'H':
-            tz = util.constants.TZ['HST10HDT']
+            tz = constants.TZ['HST10HDT']
         
         # Determine if we're in daylight savings time
         if tzStr[1] == 'D':
@@ -236,7 +236,7 @@ def tsToDT(ts, timezone=None):
             daylight = False
         
         # Remove the timezone portion of the string
-        ts = util.constants.TZ_EXP.sub('', ts).strip()
+        ts = constants.TZ_EXP.sub('', ts).strip()
         
     else:
         # Get timezone object
@@ -244,7 +244,7 @@ def tsToDT(ts, timezone=None):
         daylight = None
         
     # Create naive object.
-    naive = datetime.datetime.strptime(ts, util.constants.DATE_FMT)
+    naive = datetime.datetime.strptime(ts, constants.DATE_FMT)
     # Add timezone information.
     dt = naive.replace(tzinfo=tz)
     
@@ -294,19 +294,19 @@ def toUTC(ts, timezone=None):
 def getTZObj(timezone):
     """Helper function to grab a tzinfo object for a given timezone. Note that
     there is currently only support for timezones described in GridLAB-D's 
-    tzinfo file. See util.constants.TZ
+    tzinfo file. See constants.TZ
     """
     # Remove a '+' if present in the timezone
     timezone = timezone.replace('+', '')
     # The folowing will result in a key error if the given timezone is bad.
-    tz = util.constants.TZ[timezone]
+    tz = constants.TZ[timezone]
     
     return tz
     
 def utcToTZ(dt, timezone):
     """Helper function to take a datetime object in UTC time and convert it
     to a timezone. Currently only supports timezones described in GridLAB-D's
-    tzinfo file. See util.constants.TZ
+    tzinfo file. See constants.TZ
     
     INPUTS:
         dt: datetime object in UTC time
@@ -467,9 +467,9 @@ class clock():
         self.stop_dt = self.stop_utc.astimezone(self.tzinfo)
                               
         # Get string representations
-        self.start_str = self.start_dt.strftime(util.constants.DATE_TZ_FMT)
-        self.stop_str = self.stop_dt.strftime(util.constants.DATE_TZ_FMT)
-        self.final_str = self.final_dt.strftime(util.constants.DATE_TZ_FMT)
+        self.start_str = self.start_dt.strftime(constants.DATE_TZ_FMT)
+        self.stop_str = self.stop_dt.strftime(constants.DATE_TZ_FMT)
+        self.final_str = self.final_dt.strftime(constants.DATE_TZ_FMT)
         
     def advanceTime(self):
         """Simple function to move the time forward some number of seconds
@@ -483,8 +483,8 @@ class clock():
         self.stop_dt = self.stop_utc.astimezone(self.tzinfo)
         
         # Update the strings
-        self.start_str = self.start_dt.strftime(util.constants.DATE_TZ_FMT)
-        self.stop_str = self.stop_dt.strftime(util.constants.DATE_TZ_FMT)
+        self.start_str = self.start_dt.strftime(constants.DATE_TZ_FMT)
+        self.stop_str = self.stop_dt.strftime(constants.DATE_TZ_FMT)
         
     
     
@@ -542,12 +542,12 @@ if __name__ == '__main__':
     for i in range(4):
         tn = tU + i*datetime.timedelta(seconds=3600)
         tP = utcToTZ(tn, tz)
-        print(tP.strftime(util.constants.DATE_FMT + ' %Z'))
+        print(tP.strftime(constants.DATE_FMT + ' %Z'))
         print('Fold: {}'.format(tP.fold))
         print('Ambiguous: {}'.format(isAmbiguous(dt=tP)))
         #print('Using strftime   :', tn.strftime(f))
         #print('With print method: ' + printDatetime(tn, f))
-        #tn2 = tn.astimezone(util.constants.TZ['PST8PDT'])
+        #tn2 = tn.astimezone(constants.TZ['PST8PDT'])
         #print('As timezone      :', tn.date(), tn.time(), tn.tzname())
         #print()
     
@@ -562,12 +562,12 @@ if __name__ == '__main__':
     for i in range(4):
         tn = tU + i*datetime.timedelta(seconds=3600)
         tP = utcToTZ(tn, tz)
-        print(tP.strftime(util.constants.DATE_FMT + ' %Z'))
+        print(tP.strftime(constants.DATE_FMT + ' %Z'))
         print('Fold: {}'.format(tP.fold))
         print('Ambiguous: {}'.format(isAmbiguous(dt=tP)))
         #print('Using strftime   :', tn.strftime(f))
         #print('With print method: ' + printDatetime(tn, f))
-        #tn2 = tn.astimezone(util.constants.TZ['PST8PDT'])
+        #tn2 = tn.astimezone(constants.TZ['PST8PDT'])
         #print('As timezone      :', tn.date(), tn.time(), tn.tzname())
         #print()
     '''
