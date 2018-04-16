@@ -64,7 +64,8 @@ def main(fdrid='_9CE150A8-8CC5-A0F9-B67E-BBD8C79D3095'):
                                          stoptime=et, timezone=tz,
                                          database=config['GLD-DB'],
                                          triplexGroup=CONST.TRIPLEX_GROUP,
-                                         powerflowFlag=True)
+                                         powerflowFlag=True,
+                                         vSource=config['SUBSTATION-VOLTAGE'])
     
     # Write the base model
     modelObj.writeModel()
@@ -149,13 +150,12 @@ def buildRecorderDicts(energyInterval, powerInterval, voltageInterval,
                              'mode': recordMode
                             }
                },
-    'triplexVoltage': {'objType': 'group_recorder',
+    'triplexVoltage': {'objType': 'recorder',
                        'properties': {'group': triplexGroup,
-                                      'prop': 'measured_voltage_12',
+                                      'propList': ['measured_voltage_12.mag',],
                                       'interval': voltageInterval,
                                       'table': 'triplexVoltage',
                                       'limit': -1,
-                                      'complex_part': ['MAG',],
                                       'mode': recordMode
                                       }
                        }

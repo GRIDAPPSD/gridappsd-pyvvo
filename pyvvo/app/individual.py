@@ -712,7 +712,7 @@ class individual:
             writeObj.addMySQLRecorder(**rD['properties'])
             # In this case, we can grab the columns directly from the
             # rD.
-            cols = rD['properties']['propList']
+            cols = gld.propToCol(rD['properties']['propList'])
             # At the time of writing, regular mysql recorders cannot specify a
             # complex part.
             complex_part = []

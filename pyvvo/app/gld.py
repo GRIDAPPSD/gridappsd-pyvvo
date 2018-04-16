@@ -147,8 +147,8 @@ def inverseTranslateTaps(lowerTaps, pos):
     return posOut
 
 def computeCosts(dbObj, energyTable, powerTable, triplexTable, tapChangeCount,
-                 capSwitchCount, costs, starttime, stoptime, tCol='t',
-                 idCol='id'):
+                 capSwitchCount, costs, starttime, stoptime, nameCol='name',
+                 tCol='t', idCol='id'):
     """Method to compute VVO costs for a given time interval. This includes
     cost of energy, capacitor switching, and regulator tap changing. Later this
     should include cost of DER engagement.
@@ -262,20 +262,15 @@ def computeCosts(dbObj, energyTable, powerTable, triplexTable, tapChangeCount,
     # TRIPLEX VOLTAGE VIOLATION COSTS
     
     # Note that the function for determining violations relies heavily on the
-    # operations of GridLAB-D's mysql group_recorder.
-    # TODO: We should change up how we're doing the group_recorder... Just make
-    # a taller table! That way, we don't have to pull out ALL the data and sift
-    # through it, we can use MySQL operations to work on the data and only pull
-    # out the stuff we care about.
-    
-    # Note, the returned value here has a 'detail' field which we can exploit
-    # to get more detail on the voltage violations.
-    v = dbObj.voltViolationsFromGroupRecorder(baseTable=triplexTable['table'],
-                                              lowerBound=costs['undervoltage']['limit'],
-                                              upperBound=costs['overvoltage']['limit'],
-                                              idCol=idCol, tCol=tCol,
-                                              starttime=starttime,
-                                              stoptime=stoptime)
+    # operations of GridLAB-D's mysql recorder.
+    v = dbObj.voltViolationsFromRecorder(table=triplexTable['table'],
+                                         lowerBound=costs['undervoltage']['limit'],
+                                         upperBound=costs['overvoltage']['limit'],
+                                         voltageCols=triplexTable['columns'],
+                                         nameCol=nameCol, idCol=idCol,
+                                         tCol=tCol,
+                                         starttime=starttime,
+                                         stoptime=stoptime)
     costDict['overvoltage'] = v['high'] * costs['overvoltage']['cost']
     costDict['undervoltage'] = v['low'] * costs['undervoltage']['cost']
     
@@ -328,3 +323,13 @@ def getRegOrCapRecordDict(objName, table, objType, timeInterval, limit=-1):
                 'limit': limit}
     
     return propDict
+
+def propToCol(propList):
+    """Helper function which translates recorder properties to column
+        names for MySQL. This should replicate how GridLAB-D does this
+        translation
+    """
+    # replace periods with underscores
+    cols = [s.replace('.', '_') for s in propList]
+    return cols
+    

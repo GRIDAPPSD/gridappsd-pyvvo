@@ -486,7 +486,16 @@ class clock():
         self.start_str = self.start_dt.strftime(constants.DATE_TZ_FMT)
         self.stop_str = self.stop_dt.strftime(constants.DATE_TZ_FMT)
         
-    
+class strRepDict(dict):
+    """Class which can be used for only string formatting a portion of named
+        format spots.
+        
+    Ex: 
+    '{bond}, {james} {bond}'.format_map(strRepDict(bond='bond'))
+    'bond, {james} bond'
+    """
+    def __missing__(self, key):
+        return '{' + key + '}'
     
 if __name__ == '__main__':
     """

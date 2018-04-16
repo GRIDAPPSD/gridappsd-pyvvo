@@ -689,9 +689,9 @@ class modGLM:
                                          'nominal_voltage': n['nominal_voltage']['prop']},
                            place='end')
         
-    def addMySQLRecorder(self, parent, table, propList, interval,
+    def addMySQLRecorder(self, table, propList, interval,
                          header_fieldnames='name', options=None, mode=None,
-                         limit=-1):
+                         limit=-1, parent=None, group=None):
         """Method to add database recorder to end of model
         
         INPUTS:
@@ -714,13 +714,12 @@ class modGLM:
         # Add formatted string to end of model.
         recorder = ('\n'
                     'object mysql.recorder {{\n'
-                    '  parent {parent};\n'
                     '  table "{table}";\n'
                     '  property {propList};\n'
                     '  interval {interval};\n'
                     '  header_fieldnames "{header_fieldnames}";\n'
                     '  limit {limit};\n'
-                    ).format(parent=parent, table=table,
+                    ).format(table=table,
                              propList=('"' + ','.join(propList) + '"'),
                              interval=interval,
                              header_fieldnames=header_fieldnames,
@@ -733,6 +732,14 @@ class modGLM:
         # Add mode if included
         if mode:
             recorder += '  mode {mode};\n'.format(mode=mode)
+            
+        # If given a parent
+        if parent:
+            recorder += '  parent {parent};\n'.format(parent=parent)
+            
+        # Add group if included
+        if group:
+            recorder += '  group "groupid={group}";\n'.format(group=group)
             
             
         self.strModel = self.strModel + recorder + '}'
@@ -991,9 +998,9 @@ class modGLM:
         return outPath
     
     def setupModel(self, starttime=None, stoptime=None, timezone=None,
-                   vSource=69715.065, playerFile=None, database=None,
+                   vSource=None, playerFile=None, database=None,
                    profiler=0, triplexGroup=None,
-                   powerflowFlag=False, swingMeter=True):
+                   powerflowFlag=False):
         """Function to add the basics to get a running model. Designed with 
         the output from Tom McDermott's CIM exporter in mind.
         

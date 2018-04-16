@@ -12,10 +12,10 @@ import mysql.connector
 import mysql.connector.pooling as pooling
 from mysql.connector import errorcode
 import helper
+from helper import strRepDict
 import constants
 import time
 import datetime
-from itertools import chain
 
 # Define how we handle time bounds.
 LEFT_BOUND = '>='
@@ -497,6 +497,80 @@ class db:
             self.closeCnxnAndCursor(cnxn, cursor)
         return rows
     
+    def voltViolationsFromRecorder(self, table, lowerBound,
+                                    upperBound, voltageCols, idCol='id',
+                                    nameCol='name',  tCol='t',
+                                    starttime=None, stoptime=None):
+        """Function to loop through a group of tables which were created by
+        GridLAB-D's mysql recorder (with a group) and sum up voltage violations.
+        
+        NOTE: bounds are exclusive for determining violations, in other words,
+        voltages in the set [lowerBound, upperBound] will not incur a
+        violation cost.
+        
+        TODO: for now, this simply counts violations. This could be extended to
+        add more detail, but it would also make sense to just look up the data
+        in the database for more detail...
+        """
+        # Create the base of the query.
+        qBase = 'SELECT COUNT({idCol}) FROM {table}'.format(idCol=idCol,
+                                                            table=table)
+        
+        # Add time filter, and ID filter if applicable
+        qBase += self.getTimeAndIDFilter(starttime=starttime,
+                                         stoptime=stoptime, table=table, 
+                                         idCol=idCol, tCol=tCol,
+                                         nameCol=nameCol)
+        
+        '''
+        qBase = ('SELECT {tCol}, {nameCol}, {voltageCols} FROM {table} '
+                 + 'WHERE ').format(tCol=tCol, nameCol=nameCol,
+                                    voltageCols=', '.join(voltageCols),
+                                    table=table)
+        '''
+                 
+        # String for comparison
+        compStr = '{col} {operator} {value}'
+        
+        # Only partly format the string (put in col, but nothing else)
+        qBase += ' AND (' + compStr.format_map(strRepDict(col=voltageCols[0]))
+        
+        # Loop over the remaining voltage columns
+        for vCol in voltageCols[1:]:
+            qBase += ' or ' + compStr.format_map(strRepDict(col=vCol))
+            
+        # Close the parentheses
+        qBase += ')'
+        
+        # Create queries for high and low voltage
+        qLow = qBase.format(operator='<', value=lowerBound)
+        qHigh = qBase.format(operator='>', value=upperBound)
+        queries = {'low': qLow, 'high': qHigh}
+        
+        # Initialize return
+        out = {}
+        
+        # Get connection and cursor.
+        cnxn, cursor = self.getCnxnAndCursor()
+        
+        try:
+            # Get the violations
+            for key, query in queries.items():
+                # Execute the query
+                cursor.execute(query)
+                violations = cursor.fetchall()
+                # Assign output (it comes in a single-valued list which
+                # contains a single-valued tuple)
+                out[key] = violations[0][0]
+        finally:
+            # Clean up.
+            self.closeCnxnAndCursor(cnxn, cursor)
+            
+        return out
+    
+    # Not using the following functions anymore, but it helps to keep it 
+    # around.
+    '''
     def getColumnNames(self, table, exceptList=None):
         """Function to get the columns for a given table.
         
@@ -534,8 +608,7 @@ class db:
             
         # Return (database query returns list of single element tuples).
         return [k[0] for k in rows]
-    
-    
+        
     def voltViolationsFromGroupRecorder(self, baseTable, lowerBound,
                                         upperBound, idCol='id', tCol='t',
                                         starttime=None, stoptime=None):
@@ -672,6 +745,7 @@ class db:
             
         # Return.
         return out
+    '''
         
     
     def updateStatus(self, inDict, dictType, table, phaseCols, t,
