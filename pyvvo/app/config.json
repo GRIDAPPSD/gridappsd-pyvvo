@@ -1,0 +1,56 @@
+{
+  "COSTS": {
+    "realEnergy": 0.00008,
+    "powerFactorLead": {
+      "limit": 0.99,
+      "cost": 0.1
+    },
+    "powerFactorLag": {
+      "limit": 0.99,
+      "cost": 0.1
+    },
+    "tapChange": 0.5,
+    "capSwitch": 0.25,
+    "undervoltage": {
+      "limit": 228,
+      "cost": 5
+    },
+    "overvoltage": {
+      "limit": 252,
+      "cost": 5
+    }
+  },
+  "INTERVALS": {
+	"SAMPLE": 60,
+	"OPTIMIZATION": 3600
+  },
+  "GLD-DB": {
+    "database": "pyvvo",
+    "user": "pyvvo",
+    "password": "pyvvo",
+    "host": "localhost"
+  },
+  "GLD-DB-NUM-CONNECTIONS": 20,
+  "BLAZEGRAPH": {
+	"host": "localhost",
+	"port": 9999,
+	"namespace": "kb"
+  },
+  "PATHS": {
+    "baseModel": "C:/Users/thay838/git_repos/GOSS-GridAPPS-D/applications/pyvvo/test/r2_12_47_2_base.glm",
+    "outDir": "C:/Users/thay838/git_repos/GOSS-GridAPPS-D/applications/pyvvo/test/output"
+  },
+  "PROBABILITIES": {
+    "top": 0.2,
+    "weak": 0.8,
+    "mutate": 0.2,
+    "cross": 0.7,
+    "capMutate": 0.1,
+    "regMutate": 0.05
+  },
+  "GA": {
+	"THREADS": 8,
+	"INDIVIDUALS": 16,
+	"GENERATIONS": 2
+  }
+}
