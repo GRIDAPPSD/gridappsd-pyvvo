@@ -1,5 +1,8 @@
 {
-  "SUBSTATION-VOLTAGE": 57735.0,
+  "FEEDER": {
+	"ID": "_0663ADF2-FC00-45BE-858E-50B3D1D01696",
+	"SUBSTATION-VOLTAGE": 57735.0
+  },
   "COSTS": {
     "realEnergy": 0.00008,
     "powerFactorLead": {
@@ -39,9 +42,10 @@
 	"namespace": "kb"
   },
   "PATHS": {
-    "baseModel": "C:/Users/thay838/git_repos/GOSS-GridAPPS-D/applications/pyvvo/test/r2_12_47_2_base.glm",
-    "outDir": "C:/Users/thay838/git_repos/GOSS-GridAPPS-D/applications/pyvvo/test/output"
+    "baseModel": "C:/Users/thay838/git_repos/gridappsd-pyvvo/pyvvo/tests/r2_12_47_2_test_base.glm",
+    "outDir": "C:/Users/thay838/git_repos/gridappsd-pyvvo/pyvvo/tests/output"
   },
+  "RANDOM-SEED": 123,
   "PROBABILITIES": {
     "top": 0.2,
     "weak": 0.8,
@@ -52,7 +56,13 @@
   },
   "GA": {
 	"THREADS": 8,
-	"INDIVIDUALS": 16,
+	"INDIVIDUALS": 8,
 	"GENERATIONS": 2
+  },
+  "LOG": {
+	"FILE": "C:/Users/thay838/git_repos/gridappsd-pyvvo/pyvvo/tests/log.txt",
+	"LEVEL": "INFO",
+	"FORMAT": "[%(asctime)s] [thread %(thread)d] [%(module)s] [%(levelname)s]: %(message)s",
+	"MODE": "w"
   }
 }
