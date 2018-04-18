@@ -73,7 +73,7 @@ def powerFactor(n):
     Will this work if we're exporting power? I think so...
     """
     # Real divided by apparent
-    pf = n.real / n.__abs__()
+    pf = n.real.__abs__() / n.__abs__()
     # Determine lagging vs leading (negative).
     # NOTE: cmath.phase returns counter-clockwise angle on interval [-pi, pi],
     # so checking sign should be reliable for determining lead vs. lag 
@@ -86,8 +86,12 @@ def powerFactor(n):
 def binaryWidth(n):
     """Compute length of binary representation of an integer.
     """
+    # can't take log of 0.
+    if n == 0:
+        return 1
+    
     # Use + 1 to account for 2^0
-    width = math.ceil(math.log(n, 2)) + 1
+    width = math.floor(math.log(n, 2)) + 1
     
     return width
 
