@@ -3,10 +3,11 @@ Created on Apr 18, 2018
 
 @author: thay838
 '''
+# Get the parent directory on the path:
 import os,sys,inspect
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 parentdir = os.path.dirname(currentdir)
-sys.path.insert(0,parentdir) 
+sys.path.insert(0,parentdir)
 
 import unittest
 import cmath
