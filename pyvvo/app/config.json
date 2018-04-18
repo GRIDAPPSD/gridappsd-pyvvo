@@ -16,11 +16,11 @@
     "tapChange": 0.5,
     "capSwitch": 0.25,
     "undervoltage": {
-      "limit": 228,
+      "limit": 114,
       "cost": 5
     },
     "overvoltage": {
-      "limit": 252,
+      "limit": 126,
       "cost": 5
     }
   },

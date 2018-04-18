@@ -1053,9 +1053,9 @@ class modGLM:
             self.updateClock(starttime=starttime, stoptime=stoptime,
                                  timezone=timezone)
             
-        # Add groupid to triplex_load objects
+        # Add groupid to triplex_meter objects
         if triplexGroup:
-            self.addGroupToObjects(objectRegex=TRIPLEX_LOAD_REGEX,
+            self.addGroupToObjects(objectRegex=TRIPLEX_METER_REGEX,
                                    groupName=triplexGroup)
             
         # If the swing bus isn't a meter object, we need to add a meter to it

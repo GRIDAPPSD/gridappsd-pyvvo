@@ -537,7 +537,7 @@ class db:
         
         # Loop over the remaining voltage columns
         for vCol in voltageCols[1:]:
-            qBase += ' or ' + compStr.format_map(strRepDict(col=vCol))
+            qBase += ' OR ' + compStr.format_map(strRepDict(col=vCol))
             
         # Close the parentheses
         qBase += ')'
