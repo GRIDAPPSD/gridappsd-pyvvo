@@ -13,9 +13,9 @@ import constants
 import copy
 
 # Compile some regular expressions for detection of complex number forms
-RECT_EXP = re.compile(r'[+-]([0-9])+(\.)*([0-9])*(e[+-]([0-9])+)*[+-]([0-9])+(\.)*([0-9])*(e[+-]([0-9])+)*j')
-FIRST_EXP = re.compile(r'[+-]([0-9])+(\.)*([0-9])*(e[+-]([0-9])+)*')
-SECOND_EXP = re.compile(r'[+-]([0-9])+(\.)*([0-9])*(e[+-]([0-9])+)*[dr]')
+RECT_EXP = re.compile(r'[+-]*([0-9])+(\.)*([0-9])*(e[+-]*([0-9])+)*[+-]([0-9])+(\.)*([0-9])*(e[+-]([0-9])+)*j')
+FIRST_EXP = re.compile(r'[+-]*([0-9])+(\.)*([0-9])*(e[+-]*([0-9])+)*')
+SECOND_EXP = re.compile(r'[+-]*([0-9])+(\.)*([0-9])*(e[+-]*([0-9])+)*[dr]')
    
 def getComplex(s):
     """Function to take a string which represents a complex number and convert
