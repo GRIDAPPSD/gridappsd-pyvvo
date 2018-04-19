@@ -38,8 +38,19 @@ import constants as CONST
 from helper import clock
     
 def main():
+    # Current, as of 04/19: 
+    # 8500: _4F76A5F9-271D-9EB8-5E31-AA362D86F2C3
+    # R2: _0663ADF2-FC00-45BE-858E-50B3D1D01696
+    
     # fdrid='_0663ADF2-FC00-45BE-858E-50B3D1D01696'
     # fdrid='_9CE150A8-8CC5-A0F9-B67E-BBD8C79D3095'
+    
+    #define VSOURCE=66395.3
+    #include "test8500_base.glm";
+    
+    #define VSOURCE=57735.0
+    #include "testR2_base.glm";
+    
     """Main function.
     """
     # Read the config file.
@@ -62,9 +73,13 @@ def main():
     cap = sparqlObj.getCaps(fdrid=config['FEEDER']['ID'])
     log.info('Regulator and Capacitor information pulled from blazegraph.')
     
+    # Get dictionary of loads and their nominal voltages
+    loadV = sparqlObj.getLoadNomV(fdrid=config['FEEDER']['ID'])
+    log.info('Load nominal voltage data pulled from blazegraph.')
+    
     # Connect to the MySQL database for gridlabd simulations
     dbObj = db.db(**config['GLD-DB'],
-                  pool_size=config['GLD-DB-NUM-CONNECTIONS'])
+                  pool_size=config['GLD-DB-OTHER']['NUM-CONNECTIONS'])
     log.info('Connected to MySQL database for GridLAB-D simulation output.')
     
     # Clear out the database while testing.
@@ -112,7 +127,8 @@ def main():
                            voltageInterval=config['INTERVALS']['SAMPLE'],
                            energyPowerMeter=swingMeterName,
                            triplexGroup=CONST.TRIPLEX_GROUP,
-                           recordMode='a')
+                           recordMode='a',
+                           query_buffer_limit=config['GLD-DB-OTHER']['QUERY_BUFFER_LIMIT'])
     
     # Initialize a population.
     # TODO - let's get the 'inPath' outta here. It's really just being used for
@@ -151,7 +167,8 @@ def readConfig():
     return config
 
 def buildRecorderDicts(energyInterval, powerInterval, voltageInterval, 
-                       energyPowerMeter, triplexGroup, recordMode):
+                       energyPowerMeter, triplexGroup, recordMode,
+                       query_buffer_limit):
     """Helper function to construct dictionaries to be used by individuals to
     add recorders to their own models.
     
@@ -168,7 +185,8 @@ def buildRecorderDicts(energyInterval, powerInterval, voltageInterval,
                               'interval': energyInterval,
                               'propList': ['measured_real_energy',],
                               'limit': -1,
-                              'mode': recordMode
+                              'mode': recordMode,
+                              'query_buffer_limit': query_buffer_limit
                               }
                },
     'power': {'objType': 'recorder',
@@ -178,7 +196,8 @@ def buildRecorderDicts(energyInterval, powerInterval, voltageInterval,
                              'propList': ['measured_real_power',
                                           'measured_reactive_power'],
                              'limit': -1,
-                             'mode': recordMode
+                             'mode': recordMode,
+                             'query_buffer_limit': query_buffer_limit
                             }
                },
     'triplexVoltage': {'objType': 'recorder',
@@ -188,7 +207,8 @@ def buildRecorderDicts(energyInterval, powerInterval, voltageInterval,
                                       'interval': voltageInterval,
                                       'table': 'triplexVoltage',
                                       'limit': -1,
-                                      'mode': recordMode
+                                      'mode': recordMode,
+                                      'query_buffer_limit': query_buffer_limit
                                       }
                        }
     }

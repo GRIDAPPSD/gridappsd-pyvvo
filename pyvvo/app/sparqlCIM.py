@@ -13,7 +13,12 @@ PREFIX r: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX c: <http://iec.ch/TC57/2012/CIM-schema-cim17#>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 """
-FDRID = '_9CE150A8-8CC5-A0F9-B67E-BBD8C79D3095' #R2-12.47-2
+#FDRID = '_9CE150A8-8CC5-A0F9-B67E-BBD8C79D3095' #R2-12.47-2
+FDRID = '_0663ADF2-FC00-45BE-858E-50B3D1D01696' #R2-12.47-2
+
+# We have to convert nominal voltages from three-phase phase-to-phase to phase
+# to ground.
+NOMVFACTOR = 3**0.5
 
 class sparqlCIM:
     
@@ -30,7 +35,7 @@ class sparqlCIM:
         # Get sparql connection running
         self.sparql = SPARQLWrapper2(self.connStr)
         
-    def getRegs(self, fdrid=FDRID):
+    def getRegs(self, fdrid):
         """Get voltage regulators, massage into desired format.
         
         INPUTS: fdrid: feeder ID. Pull only from specific feeder
@@ -208,7 +213,7 @@ class sparqlCIM:
         # We're all done. Return.
         return reg
     
-    def getCaps(self, fdrid=FDRID):
+    def getCaps(self, fdrid):
         """Get capacitors, massage into desired format.
         
         INPUTS: fdrid: feeder ID. Pull only from specific feeder
@@ -264,7 +269,7 @@ class sparqlCIM:
                     "?t c:Terminal.ConnectivityNode ?cn. " 
                     "?cn c:IdentifiedObject.name ?bus "
             "}} "
-            "ORDER by ?name"
+            "ORDER by ?name "
             ).format(fdrid=fdrid)
             
         # Set and execute the query.
@@ -335,6 +340,71 @@ class sparqlCIM:
             
         # All done. Return.
         return cap
+    
+    def getLoadNomV(self, fdrid):
+        """Method to get nominal voltages from each 'EnergyConsumer.'
+        
+        Query source is Powergrid-Models/blazegraph/queries.txt, and it was 
+        modified from there.
+        
+        For now, we'll just get the 'bus' (which is really the object name in
+        the GridLAB-D model) and nominal voltage. Nominal voltage is given
+        as 3-phase phase-to-phase, even if we're talking about a split-phase.
+        I suppose that's what you get when you apply a transmission standard
+        to the secondary side of a distribution system...
+        
+        TODO: Later, we may want to act according to the load connection/phases
+        """
+        
+        query = \
+            (PREFIX +
+            r'SELECT ?name ?bus ?basev ?conn (group_concat(distinct ?phs;separator="\n") as ?phases) '
+            "WHERE {{ "
+                "?s r:type c:EnergyConsumer. "
+                'VALUES ?fdrid {{"{fdrid}"}} '
+                "?s c:Equipment.EquipmentContainer ?fdr. "
+                "?fdr c:IdentifiedObject.mRID ?fdrid. " 
+                "?s c:IdentifiedObject.name ?name. "
+                "?s c:ConductingEquipment.BaseVoltage ?bv. "
+                "?bv c:BaseVoltage.nominalVoltage ?basev. "
+                "?s c:EnergyConsumer.phaseConnection ?connraw. "
+                'bind(strafter(str(?connraw),"PhaseShuntConnectionKind.") as ?conn) '
+                "OPTIONAL {{ "
+                    "?ecp c:EnergyConsumerPhase.EnergyConsumer ?s. "
+                    "?ecp c:EnergyConsumerPhase.phase ?phsraw. "
+                    'bind(strafter(str(?phsraw),"SinglePhaseKind.") as ?phs) '
+                "}} "
+                "?t c:Terminal.ConductingEquipment ?s. "
+                "?t c:Terminal.ConnectivityNode ?cn. " 
+                "?cn c:IdentifiedObject.name ?bus "
+            "}} "
+            "GROUP BY ?name ?bus ?basev ?p ?q ?conn "
+            "ORDER by ?name "
+            ).format(fdrid=fdrid)
+        
+        # Set and execute the query.
+        self.sparql.setQuery(query)
+        ret = self.sparql.query()
+        
+        # Initialize output
+        out = {}
+        
+        # Loop over the return
+        for el in ret.bindings:
+            try:
+                out[el['bus'].value]
+            except KeyError:
+                # We haven't yet addressed this bus. Note that even for split-
+                # phase we have to divide by the square root of three to get
+                # phase to neutral.
+                out[el['bus'].value] = float(el['basev'].value) / NOMVFACTOR
+            else:
+                # We've addressed this load already. Assume loads at bus have
+                # the same nominal voltage. Seems reasonable considering
+                # they're electrically connected.
+                pass
+            
+        return out
         
     def dropAll(self):
         """Simple method to drop all
@@ -352,5 +422,5 @@ if __name__ == '__main__':
     obj = sparqlCIM()
     #ret = obj.dropAll()
     #reg = obj.getRegs()
-    reg = obj.getRegs(fdrid='_4F76A5F9-271D-9EB8-5E31-AA362D86F2C3')
+    reg = obj.getLoadNomV(fdrid=FDRID)
     print('yay')

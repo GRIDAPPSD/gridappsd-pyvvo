@@ -691,7 +691,8 @@ class modGLM:
         
     def addMySQLRecorder(self, table, propList, interval,
                          header_fieldnames='name', options=None, mode=None,
-                         limit=-1, parent=None, group=None):
+                         limit=-1, parent=None, group=None,
+                         query_buffer_limit=None):
         """Method to add database recorder to end of model
         
         INPUTS:
@@ -740,6 +741,9 @@ class modGLM:
         # Add group if included
         if group:
             recorder += '  group "groupid={group}";\n'.format(group=group)
+            
+        if query_buffer_limit:
+            recorder += '  query_buffer_limit {};\n'.format(query_buffer_limit)
             
             
         self.strModel = self.strModel + recorder + '}'

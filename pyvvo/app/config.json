@@ -1,7 +1,7 @@
 {
   "FEEDER": {
-	"ID": "_0663ADF2-FC00-45BE-858E-50B3D1D01696",
-	"SUBSTATION-VOLTAGE": 57735.0
+	"ID": "_4F76A5F9-271D-9EB8-5E31-AA362D86F2C3",
+	"SUBSTATION-VOLTAGE": 66395.3
   },
   "COSTS": {
     "realEnergy": 0.00008,
@@ -35,14 +35,17 @@
     "password": "pyvvo",
     "host": "localhost"
   },
-  "GLD-DB-NUM-CONNECTIONS": 20,
+  "GLD-DB-OTHER": {
+	"NUM-CONNECTIONS": 20,
+	"QUERY_BUFFER_LIMIT": 20000
+  },
   "BLAZEGRAPH": {
 	"host": "localhost",
 	"port": 9999,
 	"namespace": "kb"
   },
   "PATHS": {
-    "baseModel": "C:/Users/thay838/git_repos/gridappsd-pyvvo/pyvvo/tests/r2_12_47_2_test_base.glm",
+    "baseModel": "C:/Users/thay838/git_repos/gridappsd-pyvvo/pyvvo/tests/models/ieee8500_base.glm",
     "outDir": "C:/Users/thay838/git_repos/gridappsd-pyvvo/pyvvo/tests/output"
   },
   "RANDOM-SEED": 123,
@@ -56,12 +59,12 @@
   },
   "GA": {
 	"THREADS": 8,
-	"INDIVIDUALS": 8,
+	"INDIVIDUALS": 16,
 	"GENERATIONS": 2
   },
   "LOG": {
 	"FILE": "C:/Users/thay838/git_repos/gridappsd-pyvvo/pyvvo/tests/log.txt",
-	"LEVEL": "INFO",
+	"LEVEL": "DEBUG",
 	"FORMAT": "[%(asctime)s] [thread %(thread)d] [%(module)s] [%(levelname)s]: %(message)s",
 	"MODE": "w"
   }
