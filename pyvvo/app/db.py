@@ -1,8 +1,7 @@
 '''
 Helper module for basic database functionality.
 
-Prerequisites: mysql-connector. NOTE: Need to install 2.1.6 since
-    2.3.3 fails to install. 'pip install mysql-connector==2.1.6'
+Prerequisites: mysql-connector-python.
 
 Created on Aug 29, 2017
 
