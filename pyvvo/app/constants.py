@@ -27,3 +27,5 @@ TZ_EXP = re.compile('[ECMPAH][SD]T')
 
 # Group for triplex.
 TRIPLEX_GROUP = 'triplexGroup'
+# Group for 480V loads
+G480V = 'g_480'

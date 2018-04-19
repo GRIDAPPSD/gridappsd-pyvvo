@@ -19,6 +19,11 @@ FDRID = '_0663ADF2-FC00-45BE-858E-50B3D1D01696' #R2-12.47-2
 # We have to convert nominal voltages from three-phase phase-to-phase to phase
 # to ground.
 NOMVFACTOR = 3**0.5
+# For whatever reason, triplex nominal voltage comes in as 208V, but really
+# that should translate to 120V.
+TRIPLEXV = 208
+# Industrial/commercial loads will often be at 480 volts
+INDUSTRIALV = 480
 
 class sparqlCIM:
     
@@ -358,7 +363,7 @@ class sparqlCIM:
         
         query = \
             (PREFIX +
-            r'SELECT ?name ?bus ?basev ?conn (group_concat(distinct ?phs;separator="\n") as ?phases) '
+            r'SELECT ?name ?bus ?basev ?conn (group_concat(distinct ?phs;separator=",") as ?phases) '
             "WHERE {{ "
                 "?s r:type c:EnergyConsumer. "
                 'VALUES ?fdrid {{"{fdrid}"}} '
@@ -387,22 +392,32 @@ class sparqlCIM:
         ret = self.sparql.query()
         
         # Initialize output
-        out = {}
+        out = {'triplex': {'nomV': 208 / NOMVFACTOR, 'meters': []},
+               '480V': {'nomV': 480 / NOMVFACTOR, 'meters': []}
+               }
         
         # Loop over the return
         for el in ret.bindings:
-            try:
-                out[el['bus'].value]
-            except KeyError:
-                # We haven't yet addressed this bus. Note that even for split-
-                # phase we have to divide by the square root of three to get
-                # phase to neutral.
-                out[el['bus'].value] = float(el['basev'].value) / NOMVFACTOR
+            # grab variables
+            v = float(el['basev'].value)
+            phs = el['phases'].value
+            name = el['bus'].value
+            if v == TRIPLEXV and ('s1' in phs or 's2' in phs):
+                # Triplex (split-phase) load
+                if name not in out['triplex']['meters']:
+                    out['triplex']['meters'].append(name)
+                
+            elif v == INDUSTRIALV:
+                # Industrial 480V load
+                if name not in out['480V']['meters']:
+                    out['480V']['meters'].append(name)
             else:
-                # We've addressed this load already. Assume loads at bus have
-                # the same nominal voltage. Seems reasonable considering
-                # they're electrically connected.
-                pass
+                raise UserWarning(\
+                    ('Unexpected load from blazegraph: '
+                    '  name: {}\n  voltage: {}\n  phases: {}'.format(name, v,
+                                                                     phs)
+                     )
+                                  )
             
         return out
         

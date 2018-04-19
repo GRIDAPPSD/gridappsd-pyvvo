@@ -103,9 +103,11 @@ def main():
         modelObj.setupModel(starttime=st,
                             stoptime=et, timezone=tz,
                             database=config['GLD-DB'],
-                            triplexGroup=CONST.TRIPLEX_GROUP,
                             powerflowFlag=True,
-                            vSource=config['FEEDER']['SUBSTATION-VOLTAGE'])
+                            vSource=config['FEEDER']['SUBSTATION-VOLTAGE'],
+                            triplexGroup=CONST.TRIPLEX_GROUP,
+                            triplexList=loadV['triplex']['meters']
+                            )
     
     # Write the base model
     modelObj.writeModel()

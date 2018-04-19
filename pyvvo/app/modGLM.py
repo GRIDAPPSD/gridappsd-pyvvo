@@ -14,6 +14,7 @@ import re
 import os
 import helper
 import csv
+import copy
 
 # Time formatting:
 TIME_FMT = "%Y-%m-%d %H:%M:%S"
@@ -604,14 +605,20 @@ class modGLM:
         
         return meterName
     
-    def addGroupToObjects(self, objectRegex, groupName):
+    def addGroupToObjects(self, objectRegex, groupName, nameList=None):
         """Method to add a groupid to a given type of object.
         
         INPUTS: 
             objectRegex: compiled regular expression for the object type
                 desired.
             groupName: desired groupid to be added to objects.
+            nameList: Optional. If provided, should be a list of object
+                names. Only objects with their name in the list will be
+                modified.
         """
+        # Make a copy of the list, since we'll be removing items as we go.
+        nameListC = copy.copy(nameList)
+        
         # Get the first match.
         m = objectRegex.search(self.strModel)
         
@@ -619,6 +626,20 @@ class modGLM:
         while m:
             # Extract the object
             obj = self.extractObject(objMatch=m)
+            
+            if nameList is not None:
+                # Extract the name
+                n = self.extractProperties(obj['obj'], ['name'])
+                
+                try:
+                    # Remove the name from our list.
+                    nameListC.remove(n['name']['prop'])
+                except ValueError:
+                    # Name not in the list. Get the next object match and carry
+                    # on.
+                    m = objectRegex.search(self.strModel, 
+                                           m.span()[0] + len(obj['obj']))
+                    continue
             
             # Add a groupid.
             obj['obj'] = self.modObjProps(obj['obj'], {'groupid': groupName})
@@ -628,7 +649,7 @@ class modGLM:
             
             # Get the next match, offsetting by length of new object.
             m = objectRegex.search(self.strModel,
-                                          m.span()[0] + len(obj['obj']))
+                                   m.span()[0] + len(obj['obj']))
     
     def recordTriplex(self, suffix, interval=60):
         """Method to add a recorder for each 'triplex_load' object.
@@ -1003,7 +1024,7 @@ class modGLM:
     
     def setupModel(self, starttime=None, stoptime=None, timezone=None,
                    vSource=None, playerFile=None, database=None,
-                   profiler=0, triplexGroup=None,
+                   profiler=0, triplexGroup=None, triplexList=None,
                    powerflowFlag=False):
         """Function to add the basics to get a running model. Designed with 
         the output from Tom McDermott's CIM exporter in mind.
@@ -1060,7 +1081,8 @@ class modGLM:
         # Add groupid to triplex_meter objects
         if triplexGroup:
             self.addGroupToObjects(objectRegex=TRIPLEX_METER_REGEX,
-                                   groupName=triplexGroup)
+                                   groupName=triplexGroup,
+                                   nameList=triplexList)
             
         # If the swing bus isn't a meter object, we need to add a meter to it
         # so we can measure the desired properties.
