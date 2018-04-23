@@ -5,7 +5,10 @@ Created on Mar 1, 2018
 '''
 from SPARQLWrapper import SPARQLWrapper2, SPARQLWrapper
 from collections import OrderedDict
+
+# pyvvo imports
 from helper import binaryWidth
+from constants import LOADS, NOMVFACTOR
 
 # Define query prefix
 PREFIX = """
@@ -15,15 +18,6 @@ PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 """
 #FDRID = '_9CE150A8-8CC5-A0F9-B67E-BBD8C79D3095' #R2-12.47-2
 FDRID = '_0663ADF2-FC00-45BE-858E-50B3D1D01696' #R2-12.47-2
-
-# We have to convert nominal voltages from three-phase phase-to-phase to phase
-# to ground.
-NOMVFACTOR = 3**0.5
-# For whatever reason, triplex nominal voltage comes in as 208V, but really
-# that should translate to 120V.
-TRIPLEXV = 208
-# Industrial/commercial loads will often be at 480 volts
-INDUSTRIALV = 480
 
 class sparqlCIM:
     
@@ -392,8 +386,8 @@ class sparqlCIM:
         ret = self.sparql.query()
         
         # Initialize output
-        out = {'triplex': {'nomV': 208 / NOMVFACTOR, 'meters': []},
-               '480V': {'nomV': 480 / NOMVFACTOR, 'meters': []}
+        out = {'triplex': {'v': 208 / NOMVFACTOR, 'meters': []},
+               '480V': {'v': 480 / NOMVFACTOR, 'meters': []}
                }
         
         # Loop over the return
@@ -402,12 +396,12 @@ class sparqlCIM:
             v = float(el['basev'].value)
             phs = el['phases'].value
             name = el['bus'].value
-            if v == TRIPLEXV and ('s1' in phs or 's2' in phs):
+            if v == LOADS['triplex']['v'] and ('s1' in phs or 's2' in phs):
                 # Triplex (split-phase) load
                 if name not in out['triplex']['meters']:
                     out['triplex']['meters'].append(name)
                 
-            elif v == INDUSTRIALV:
+            elif v == LOADS['480V']['v']:
                 # Industrial 480V load
                 if name not in out['480V']['meters']:
                     out['480V']['meters'].append(name)
@@ -420,6 +414,44 @@ class sparqlCIM:
                                   )
             
         return out
+    
+    def getSwingVoltage(self, fdrid):
+        """Get feeder nominal voltage at the swing node.
+        
+        NOTE: This returns the maximum voltage returned. 
+        
+        TODO: Use a more sophisticated query to actually get the voltage at the
+        swing node, rather than assuming it's the highest voltage in the 
+        feeder.
+        """
+        
+        # Form the query.
+        query = \
+            (PREFIX + 
+             'SELECT DISTINCT ?vnom '
+             'WHERE {{ '
+             '    ?fdr c:IdentifiedObject.mRID "{fdrid}". '
+             '    ?s c:ConnectivityNode.ConnectivityNodeContainer|c:Equipment.EquipmentContainer ?fdr. '
+             '    ?s c:ConductingEquipment.BaseVoltage ?lev. '
+             '    ?lev c:BaseVoltage.nominalVoltage ?vnom. '
+             '}} '
+             'ORDER by ?vnom').format(fdrid=fdrid)
+             
+        # Set and execute the query.
+        self.sparql.setQuery(query)
+        ret = self.sparql.query()
+        
+        # Initialize return
+        maxV = 0
+        
+        # Loop over the return
+        for el in ret.bindings:
+            v = float(el['vnom'].value) 
+            if v > maxV:
+                maxV = v
+                
+        # Convert from phase to phase to phase to neutral and return
+        return maxV / NOMVFACTOR
         
     def dropAll(self):
         """Simple method to drop all

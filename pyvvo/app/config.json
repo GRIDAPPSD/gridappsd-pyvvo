@@ -1,7 +1,6 @@
 {
   "FEEDER": {
-	"ID": "_4F76A5F9-271D-9EB8-5E31-AA362D86F2C3",
-	"SUBSTATION-VOLTAGE": 66395.3
+	"ID": "_4F76A5F9-271D-9EB8-5E31-AA362D86F2C3"
   },
   "COSTS": {
     "realEnergy": 0.00008,
@@ -16,11 +15,11 @@
     "tapChange": 0.5,
     "capSwitch": 0.25,
     "undervoltage": {
-      "limit": 114,
+      "limit": 0.95,
       "cost": 5
     },
     "overvoltage": {
-      "limit": 126,
+      "limit": 1.05,
       "cost": 5
     }
   },

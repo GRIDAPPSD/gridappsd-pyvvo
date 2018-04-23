@@ -25,7 +25,11 @@ TZ = {'EST5EDT':    dateutil.tz.gettz('US/Eastern'),
 # Create regular expression for checking for timezone strings
 TZ_EXP = re.compile('[ECMPAH][SD]T')
 
-# Group for triplex.
-TRIPLEX_GROUP = 'triplexGroup'
-# Group for 480V loads
-G480V = 'g_480'
+# Definitions for grouping like loads together.
+LOADS = {'triplex': {'group': 'triplexGroup', 'v': 208},
+         '480V': {'group': 'group_480', 'v': 480}
+         }
+
+# We have to convert nominal voltages from three-phase phase-to-phase to phase
+# to ground.
+NOMVFACTOR = 3**0.5

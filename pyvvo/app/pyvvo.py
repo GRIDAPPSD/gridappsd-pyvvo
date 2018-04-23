@@ -17,6 +17,7 @@ except ImportError:
 import os
 import sys
 import logging
+import copy
 #import traceback
 
 # Get this directory.
@@ -75,7 +76,8 @@ def main():
     
     # Get dictionary of loads and their nominal voltages
     loadV = sparqlObj.getLoadNomV(fdrid=config['FEEDER']['ID'])
-    log.info('Load nominal voltage data pulled from blazegraph.')
+    swingV = sparqlObj.getSwingVoltage(fdrid=config['FEEDER']['ID'])
+    log.info('Load and swing bus nominal voltage data pulled from blazegraph.')
     
     # Connect to the MySQL database for gridlabd simulations
     dbObj = db.db(**config['GLD-DB'],
@@ -104,8 +106,9 @@ def main():
                             stoptime=et, timezone=tz,
                             database=config['GLD-DB'],
                             powerflowFlag=True,
-                            vSource=config['FEEDER']['SUBSTATION-VOLTAGE'],
-                            triplexGroup=CONST.TRIPLEX_GROUP,
+                            vSource=swingV,
+                            #vSource=config['FEEDER']['SUBSTATION-VOLTAGE'],
+                            triplexGroup=CONST.LOADS['triplex']['group'],
                             triplexList=loadV['triplex']['meters']
                             )
     
@@ -128,9 +131,16 @@ def main():
                            powerInterval=config['INTERVALS']['SAMPLE'],
                            voltageInterval=config['INTERVALS']['SAMPLE'],
                            energyPowerMeter=swingMeterName,
-                           triplexGroup=CONST.TRIPLEX_GROUP,
+                           triplexGroup=CONST.LOADS['triplex']['group'],
                            recordMode='a',
                            query_buffer_limit=config['GLD-DB-OTHER']['QUERY_BUFFER_LIMIT'])
+    
+    # Convert costs from fraction of nominal voltage to actual voltage
+    costs = copy.copy(config['COSTS'])
+    costs['undervoltage']['limit'] = (costs['undervoltage']['limit']
+                                      * loadV['triplex']['v'])
+    costs['overvoltage']['limit'] = (costs['overvoltage']['limit']
+                                     * loadV['triplex']['v'])
     
     # Initialize a population.
     # TODO - let's get the 'inPath' outta here. It's really just being used for
@@ -147,7 +157,7 @@ def main():
                                    inPath=modelObj.pathModelIn,
                                    outDir=outDir,
                                    reg=reg, cap=cap,
-                                   costs=config['COSTS'],
+                                   costs=costs,
                                    probabilities=config['PROBABILITIES'],
                                    gldPath=config['GLD-PATH'],
                                    randomSeed=config['RANDOM-SEED'],
