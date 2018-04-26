@@ -33,7 +33,7 @@ class individual:
     
     def __init__(self, uid, starttime, stoptime, timezone, dbObj, recorders,
                  reg=None, regFlag=5, cap=None, capFlag=5, regChrom=None, 
-                 capChrom=None, parents=None, controlFlag=0, gldPath=None):
+                 capChrom=None, parents=None, controlFlag=0, gldInstall=None):
         """An individual contains information about Volt/VAR control devices
         
         Individuals can be initialized in two ways: 
@@ -141,7 +141,10 @@ class individual:
                     as there is no need to track status/switch count.
                 *NOTE: all capacitors should use the same table.
             
-            gldPath: path to GridLAB-D installation
+            gldInstall: dict with two fields, 'DIR' and 'LD_LIBRARY_PATH'
+                - 'DIR' should point to GridLAB-D installation to use.
+                - 'LD_LIBRARY_PATH' should be None on Windows, but should point
+                    to the necessary lib folder on Linux (/usr/local/mysql/lib)
         """
         # Ensure flags are compatible.
         if controlFlag:
@@ -156,8 +159,8 @@ class individual:
         # and timezones don't often change.
         self.timezone = timezone
         
-        # Assign gldPath
-        self.gldPath = gldPath
+        # Assign gldInstall
+        self.gldInstall = gldInstall
         
         # set database object
         self.dbObj = dbObj
@@ -736,7 +739,7 @@ class individual:
         """
         self.modelOutput = gld.runModel(modelPath=(self.outDir + '/'
                                                         + self.modelPath),
-                                             gldPath=self.gldPath)
+                                        **self.gldInstall)
         # TODO: Handle a failed GridLAB-D run (catch a CalledProcessError)
         # If a model failed to run, print to the console.
         if self.modelOutput.returncode:

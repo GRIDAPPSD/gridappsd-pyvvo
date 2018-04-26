@@ -33,7 +33,7 @@ class population:
                                   'regMutate': 0.05},
                  baseControlFlag=None,
                  randomSeed=None,
-                 gldPath=None,
+                 gldInstall=None,
                  log=None):
         """Initialize a population of individuals.
         
@@ -82,7 +82,10 @@ class population:
                 to an individual's constructor for details.
             randomSeed: integer to seed the random number generator. Python is
                 smart enough to seed for all modules below.
-            gldPath: path to GridLAB-D installation to use.
+            gldInstall: dict with two fields, 'DIR' and 'LD_LIBRARY_PATH'
+                - 'DIR' should point to GridLAB-D installation to use.
+                - 'LD_LIBRARY_PATH' should be None on Windows, but should point
+                    to the necessary lib folder on Linux (/usr/local/mysql/lib)
             log: logging.Logger instance. If none, a simple default log will 
                 be used.
         """
@@ -133,7 +136,7 @@ class population:
         self.baseControlFlag = baseControlFlag
         
         # GridLAB-D path
-        self.gldPath = gldPath
+        self.gldInstall = gldInstall
         
         # Initialize queues and threads for running GLD models in parallel and
         # cleaning up models we're done with.
@@ -192,7 +195,7 @@ class population:
                           'timezone': self.timezone,
                           'dbObj': self.dbObj,
                           'recorders': self.recorders,
-                          'gldPath': self.gldPath}
+                          'gldInstall': self.gldInstall}
         
         # If the population includes a 'baseline' model, we need to track it.
         # TODO: May want to update this to track multiple baseline individuals

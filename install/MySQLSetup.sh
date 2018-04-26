@@ -11,9 +11,11 @@ apt-get -q -y install mysql-server
 update-rc.d mysql defaults
 # Change the default socket location
 cat <<EOT >> /etc/mysql/my.cnf
-# Change default socket location
+# Change default socket location, ensure the innodb_buffer is adequate
 [mysqld]
 socket=/tmp/mysql.sock
+innodb_db_buffer_pool_size=4G
+innodb_buffer_pool_instances=16
 
 [client]
 socket=/tmp/mysql.sock

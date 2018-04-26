@@ -42,7 +42,7 @@ class db:
     
     def __init__(self, user='gridlabd', password='gridlabd',
                  host='localhost', database='gridlabd',
-                 pool_size=1):
+                 pool_size=1, **kwargs):
         """Initializing the db class creates a pool of database connections.
         """
         # Set attributes

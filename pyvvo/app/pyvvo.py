@@ -159,7 +159,7 @@ def main():
                                    reg=reg, cap=cap,
                                    costs=costs,
                                    probabilities=config['PROBABILITIES'],
-                                   gldPath=config['GLD-PATH'],
+                                   gldInstall=config['GLD-INSTALLATION'],
                                    randomSeed=config['RANDOM-SEED'],
                                    log=log)
     

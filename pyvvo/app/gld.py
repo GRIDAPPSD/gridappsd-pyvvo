@@ -86,11 +86,13 @@ MEASURED_POWER = ['measured_power_A', 'measured_power_B', 'measured_power_C']
 MEASURED_ENERGY = ['measured_real_energy']
 TRIPLEX_VOLTAGE = ['measured_voltage_12']
 
-def runModel(modelPath, gldPath=None):
+def runModel(modelPath, DIR=None, LD_LIBRARY_PATH=None):
     #, gldPath=r'C:/gridlab-d/develop'):
     """Function to run GridLAB-D model.
     
-    IMPORTANT NOTE: the gridlabd path is assumed to be setup.
+    DIR should point to the directory gridlab-d was built in.
+    LD_LIBRARY_PATH can be needed on Linux to properly hook-up MySQL.
+
     See http://gridlab-d.shoutwiki.com/wiki/MinGW/Eclipse_Installation#Linux_Installation
     and do a search for 'Environment Setup'
     In short, assuming build is in gridlab-d/develop:
@@ -101,24 +103,40 @@ def runModel(modelPath, gldPath=None):
     cwd, model = os.path.split(modelPath)
 
     # Setup environment if necessary
-    if gldPath:
+    if DIR:
         # We'll use forward slashes here since GLD can have problems with 
         # backslashes... Ugh.
-        gldPath = gldPath.replace('\\', '/')
+        DIR = DIR.replace('\\', '/')
         env = os.environ
-        binStr = "{}/bin".format(gldPath)
+        binStr = "{}/bin".format(DIR)
         # We can form a kind of memory leak where we grow the environment
         # variables if we add these elements repeatedly, so check before 
         # adding or changing.
         if binStr not in env['PATH']:
             env['PATH'] = binStr + os.pathsep + env['PATH']
 
-        env['GLPATH'] = ("{}/lib/gridlabd".format(gldPath) + os.pathsep
-                         + "{}/share/gridlabd".format(gldPath))
+        env['GLPATH'] = ("{}/lib/gridlabd".format(DIR) + os.pathsep
+                         + "{}/share/gridlabd".format(DIR))
         
-        env['CXXFLAGS'] = "-I{}/share/gridlabd".format(gldPath)
+        env['CXXFLAGS'] = "-I{}/share/gridlabd".format(DIR)
     else:
         env = None
+    
+    # LD_LIBRARY_PATH stuff. 
+    # TODO: May want to make the gldPath mandatory - it doesn't make much
+    # sense to have the ld_library_path variable depend on whether or not 
+    # gridlabd is on the path.
+    if (env is not None) and LD_LIBRARY_PATH is not None:
+        # Need to set the LD_LIBRARY_PATH so MySQL will work.
+        try:
+            env['LD_LIBRARY_PATH']
+        except KeyError:
+            # Not set, simpley set it.
+            env['LD_LIBRARY_PATH'] = LD_LIBRARY_PATH
+        else:
+            # Concatenate.
+            env['LD_LIBRARY_PATH'] = (env['LD_LIBRARY_PATH'] + os.pathsep
+                                      + LD_LIBRARY_PATH) 
     
     # Run command. Note with check=True exception will be thrown on failure.
     # With check=True, a CalledProcessError will be raised. This should
