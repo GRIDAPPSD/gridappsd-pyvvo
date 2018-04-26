@@ -24,6 +24,8 @@ $ sudo apt-get update
 $ sudo apt-get install python3.6
 ```
 
+There's a helper script to perform this: install/python36Setup.sh.
+
 ## Python packages
 There is an included "requirements.txt" file in the "pyvvo" directory. Note that the "gridappsd-python" also has a "requirements.txt" file, so we'll need to install those packages too. Python's pip package manager can be used to easily install packages. Here's an example if you're installing the packages for the entire system:
 ```Shell Session
@@ -33,7 +35,16 @@ $ cd ../gridappsd-python
 $ sudo -H python3.6 -m pip install -r requirements.txt
 ```
 
+## Helper shell scripts
+In the top level "install" directory, there are helper scripts for installing MySQL, GridLAB-D, Python3.6, etc.
+MySQL installtion + configuration should be performed before GridLAB-D.
+
 # MySQL Configuration
+## Installation
+You can use the script install/MySQLSetup.sh to install MySQL and the MySQL Connector/C. This script also does
+some helpful configuration for connecting with GridLAB-D and the pyvvo application.
+
+## InnoDB
 Ensure that the MySQL global variables `innod_db_buffer_pool_size` and `innodb_buffer_pool_instances` are set adequately high.
 On Brandon's Windows machine, `innod_db_buffer_pool_size=4G` and `innodb_buffer_pool_instances=16`
 
