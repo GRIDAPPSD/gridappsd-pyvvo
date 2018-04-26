@@ -16,6 +16,20 @@ The simplest way to keep the "gridappsd-python" repository up to date within thi
 $ git submodule update --remote gridappsd-python
 ```
 
+## Git Large File Storage (LFS)
+This repository contains some .xml and .glm files which are quite large. To keep the repository light, these files are tracked with git lfs. 
+To install (source)[https://github.com/git-lfs/git-lfs/wiki/Installation]:
+
+### Windows
+1. Navigate [here](https://git-lfs.github.com), download the installer, and run it.
+2. From a git bash terminal, navigate into the head of this repository and `git lfs install`
+
+### Ubuntu
+1. Add the git-core repository from the terminal: `sudo apt-add-repository ppa:git-core/ppa`
+2. Download and run the install script: `curl -s https://packagecloud.io/install/repositories/github/git-lfs/script.deb.sh | sudo bash`
+3. Install: `sudo apt-get install git-lfs`
+4. Activate: `git lfs install`
+
 ## Python
 This application works in Python 3. It is recommended that you use the latest version, which was 3.6.5 at the time of writing. On Ubuntu, installation of Python 3.6.x requires the addition of [Felix Krull's deadsnakes PPA](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa):
 ```Shell Session
