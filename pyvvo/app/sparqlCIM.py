@@ -17,7 +17,8 @@ PREFIX c: <http://iec.ch/TC57/2012/CIM-schema-cim17#>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 """
 #FDRID = '_9CE150A8-8CC5-A0F9-B67E-BBD8C79D3095' #R2-12.47-2
-FDRID = '_0663ADF2-FC00-45BE-858E-50B3D1D01696' #R2-12.47-2
+#FDRID = '_0663ADF2-FC00-45BE-858E-50B3D1D01696' #R2-12.47-2
+FDRID = '_4F76A5F9-271D-9EB8-5E31-AA362D86F2C3' # ieee 8500 node
 
 class sparqlCIM:
     
@@ -415,6 +416,70 @@ class sparqlCIM:
             
         return out
     
+    def getLoadMeasurements(self, fdrid):
+        """Get listing of measurement objects attached to EnergyConsumers.
+        """
+        query = \
+            (PREFIX +
+             "SELECT ?class ?type ?name ?bus ?phases ?eqname ?eqid ?trmid ?id "
+             "WHERE {{ "
+                'VALUES ?fdrid {{"{fdrid}"}} '
+                "?eq c:Equipment.EquipmentContainer ?fdr. "
+                "?fdr c:IdentifiedObject.mRID ?fdrid. " 
+                '{{ ?s r:type c:Discrete. bind ("Discrete" as ?class)}} '
+                'UNION '
+                '{{ ?s r:type c:Analog. bind ("Analog" as ?class)}} '
+                '?s c:IdentifiedObject.name ?name . '
+                '?s c:IdentifiedObject.mRID ?id . '
+                '?s c:Measurement.PowerSystemResource ?eq . '
+                '?s c:Measurement.Terminal ?trm . '
+                '?s c:Measurement.measurementType ?type . '
+                '?trm c:IdentifiedObject.mRID ?trmid. '
+                '?eq c:IdentifiedObject.mRID ?eqid. '
+                '?eq c:IdentifiedObject.name ?eqname. '
+                '?eq r:type c:EnergyConsumer. '
+                '?trm c:Terminal.ConnectivityNode ?cn. '
+                '?cn c:IdentifiedObject.name ?bus. '
+                '?s c:Measurement.phases ?phsraw . '
+                '{{bind(strafter(str(?phsraw),"PhaseCode.") as ?phases)}} '
+                '}} '
+                'ORDER BY ?class ?type ?name '
+            ).format(fdrid=fdrid)
+            
+        # Set and execute the query.
+        self.sparql.setQuery(query)
+        ret = self.sparql.query()
+        
+        # Initialize output dictionary
+        out = {}
+        
+        # Loop over the results
+        for el in ret.bindings:
+            try: 
+                # Get the name of the meter, which in this case is 'bus'
+                meter = el['bus'].value
+                # If we already have a measurement for this meter, append the
+                # relevant pieces. 
+                out[meter]['measClass'].append(el['class'].value)
+                out[meter]['measID'].append(el['id'].value)
+                out[meter]['phases'].append(el['phases'].value)
+                out[meter]['measType'].append(el['type'].value)
+                
+            except KeyError:
+                # We haven't hit this meter yet, create an entry.
+                out[meter] = \
+                    {'measClass': [el['class'].value,],
+                     'loadID': el['eqid'].value,
+                     'loadName': el['eqname'].value,
+                     'measID': [el['id'].value,],
+                     'measName': el['name'].value,
+                     'phases': [el['phases'].value],
+                     'termID': el['trmid'].value,
+                     'measType': [el['type'].value,]
+                    }
+                    
+        return out
+    
     def getSwingVoltage(self, fdrid):
         """Get feeder nominal voltage at the swing node.
         
@@ -469,5 +534,5 @@ if __name__ == '__main__':
     obj = sparqlCIM()
     #ret = obj.dropAll()
     #reg = obj.getRegs()
-    reg = obj.getLoadNomV(fdrid=FDRID)
+    reg = obj.getLoadMeasurements(fdrid=FDRID)
     print('yay')

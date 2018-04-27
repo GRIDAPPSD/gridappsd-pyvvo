@@ -79,6 +79,20 @@ def main():
     swingV = sparqlObj.getSwingVoltage(fdrid=config['FEEDER']['ID'])
     log.info('Load and swing bus nominal voltage data pulled from blazegraph.')
     
+    # Get dictionary of load measurements
+    loadM = sparqlObj.getLoadMeasurements(fdrid=config['FEEDER']['ID'])
+    log.info('Load measurement data pulled from blazegraph.')
+    
+    # Ensure we have a measurement for all loads.
+    # TODO: Eventually we should have a way to handle unmeasured loads.
+    for loadType in loadV:
+        for m in loadV[loadType]['meters']:
+            if m not in loadM:
+                # If we're missing it, throw an error
+                raise UserWarning('Meter {} is not being "measured"!'.format(m))
+            
+    log.info('Confirmed that all EnergyConsumers have measurements.')
+         
     # Connect to the MySQL database for gridlabd simulations
     dbObj = db.db(**config['GLD-DB'],
                   pool_size=config['GLD-DB-OTHER']['NUM-CONNECTIONS'])

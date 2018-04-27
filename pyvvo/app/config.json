@@ -28,7 +28,7 @@
 	"OPTIMIZATION": 3600
   },
   "GLD-INSTALLATION": {
-    "DIR": "/home/thay838/gridappsd-pyvvo/install/gridlab-d/builds",
+    "DIR": "C:/gridlab-d/builds/feature/1095",
     "LD_LIBRARY_PATH": "/usr/local/mysql/lib"
   },
   "GLD-DB": {

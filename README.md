@@ -18,7 +18,7 @@ $ git submodule update --remote gridappsd-python
 
 ## Git Large File Storage (LFS)
 This repository contains some .xml and .glm files which are quite large. To keep the repository light, these files are tracked with git lfs. 
-To install (source)[https://github.com/git-lfs/git-lfs/wiki/Installation]:
+To install [source](https://github.com/git-lfs/git-lfs/wiki/Installation):
 
 ### Windows
 1. Navigate [here](https://git-lfs.github.com), download the installer, and run it.
