@@ -2,3 +2,6 @@ python-dateutil
 mysql-connector-python
 simplejson
 SPARQLWrapper
+numpy
+scipy
+mystic
