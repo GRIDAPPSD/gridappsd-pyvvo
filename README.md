@@ -72,3 +72,5 @@ These settings can be configured via the options file. On Windows:
 7. Restart MySQL.
 
 Alternatively, these setting can be tweaked in MySQL Workbench the "Options File" button under the "Instance" heading in the "Navigator" pane (on the left edge of the program).
+
+More details (and commands for Linux/Unix) can be found [here](https://dev.mysql.com/doc/refman/5.7/en/innodb-buffer-pool-resize.html)
