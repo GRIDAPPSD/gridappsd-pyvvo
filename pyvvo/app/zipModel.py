@@ -24,7 +24,23 @@ SOLVERS = ['fmin_powell', 'SLSQP']
 FTOL = 1e-8
 GTOL = 5 # Number of iterations without change for fmin_powell
 
-def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell'):
+# Define default initial guess for ZIP models.
+# We'll take the Oscillating Fan from the CVR report: 
+# https://www.pnnl.gov/main/publications/external/technical_reports/PNNL-19596.pdf
+# Z%: 73.32, I%: 25.34, P%: 1.35
+# Zpf: 0.97, Ipf: 0.95, Ppf: -1.0
+PAR0 = np.array([
+    0.7332 * 0.97,
+    0.2534 * 0.95,
+    0.0135 * -1,
+    0.7332 * math.sin(math.acos(0.97)),
+    0.2534 * math.sin(math.acos(0.95)),
+    0.0135 * math.sin(math.acos(-1))
+    ])
+# Dave was initially using this:
+# PAR0 = np.ones(6)*(1/18)
+
+def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
     """Solve for ZIP coefficients usable by GridLAB-D.
     
     V: voltage magnitude array
@@ -34,6 +50,7 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell'):
     solver: either 'fmin_powell' to use mystic's modified scipy fmin_powell 
         solver, or 'SLSQP' to use scipy's sequential least squares programming
         solver.
+    par0: Initial guess. Should be array of a1, a2, a3, b1, b2, b3
     """
     # Estimate nominal power
     Sn = estimateNominalPower(P=P, Q=Q)
@@ -42,11 +59,6 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell'):
     Vbar = V/Vn
     Pbar = P/Sn
     Qbar = Q/Sn
-    
-    # Initial parameters for ZIP model
-    # TODO: initialize from previously computed coefficients to start.
-    # Why are we multiply by 1/18?
-    par0 = np.ones(6)*(1/18)
     
     # Solve.
     if solver == 'fmin_powell':
@@ -59,7 +71,6 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell'):
         
         # Get the value of the objective function (so the squared error)
         err = sol[1]
-        
     elif solver == 'SLSQP':
         sol = minimize(Object, par0, args=(Vbar, Pbar, Qbar), method='SLSQP',
                        constraints={'type':'eq', 'fun': Constrain},
@@ -102,6 +113,11 @@ def estimateNominalPower(P, Q):
     For now, we'll simply use the median of the apparent power.
     """
     Sn = np.median(np.sqrt(np.multiply(P,P) + np.multiply(Q,Q)))
+    
+    # If the median P value is negative, flip Sn.
+    #if np.median(P) < 0:
+    #    Sn *= -1
+    
     return Sn
 
 def Object(Params, Vbar, Pbar, Qbar):
@@ -193,6 +209,27 @@ def gldZIP(V, coeff, Vn):
     Check out the 'triplex_load_update_fxn()' in:
     https://github.com/gridlab-d/gridlab-d/blob/master/powerflow/triplex_load.cpp
     """
+    # GridLAB-D adjusts coefficients if they don't exactly add to one. Here's a
+    # line from triplex_load.cpp:
+    # 
+    # power_fraction[0] = 1 - current_fraction[0] - impedance_fraction[0];
+    
+    '''
+    # GridLAB-D forces the coefficients to sum to 1 if they don't exactly. This screws things up. 
+    # TODO: The application should run a custom GLD build which doesn't do this.
+    coeffSum = (coeff['power_fraction'] + coeff['current_fraction']
+                + coeff['impedance_fraction'])
+    
+    if (coeffSum) != 1:
+    #if not np.isclose(coeffSum, 1, atol=0.02):
+        
+        #print('Sum of coefficients is {}, which != 1. Correcting as GridLAB-D does.'.format(coeffSum))
+        if coeffSum < 1:
+            print('debug.')
+        coeff['power_fraction'] = 1 - coeff['current_fraction'] - coeff['impedance_fraction']
+    '''
+    
+    # Loop over the ZIP coefficients and compute each 
     d = {}
     for k in ZIPTerms:
         real = coeff['base_power']*coeff[k+'_fraction']*abs(coeff[k+'_pf'])
@@ -204,76 +241,14 @@ def gldZIP(V, coeff, Vn):
         d[k] = (real, imag)
     
     # Compute P and Q
-    P = (
-        (V**2/Vn**2) * d['impedance'][0]
-        + (V/Vn) * d['current'][0]
-        + d['power'][0]
-        )
+    P_z = (V**2/Vn**2) * d['impedance'][0]
+    P_i = (V/Vn) * d['current'][0]
+    P_p = d['power'][0]
+    P = P_z + P_i + P_p
     
-    Q = (
-        (V**2/Vn**2) * d['impedance'][1]
-        + (V/Vn) * d['current'][1]
-        + d['power'][0]
-        )
+    Q_z = (V**2/Vn**2) * d['impedance'][1]
+    Q_i = (V/Vn) * d['current'][1]
+    Q_p = d['power'][1]
+    Q = Q_z + Q_i + Q_p
     
     return P, Q
-
-if __name__ == '__main__':
-    # Get voltage array
-    V = np.arange(0.95*240, 1.05*240)
-    Vn = 240
-    #**************************************************************************
-    # Constant current
-    I = 1+1j
-    S = V * np.conjugate(I)
-    P_constI = np.real(S)
-    Q_constI = np.imag(S)
-    m = zipFit(V, P_constI, Q_constI, solver='fmin_powell')
-    P_M, Q_M = gldZIP(V, m, Vn)
-    s = zipFit(V, P_constI, Q_constI, solver='SLSQP')
-    P_S, Q_S = gldZIP(V, s, Vn)
-    print('Finished constant current test.')
-    #**************************************************************************
-    # Constant impedance
-    Z = 1+1j
-    I = V / Z
-    S = V * np.conjugate(I)
-    P_constI = np.real(S)
-    Q_constI = np.imag(S)
-    m = zipFit(V, P_constI, Q_constI, solver='fmin_powell')
-    P_M, Q_M = gldZIP(V, m, Vn)
-    s = zipFit(V, P_constI, Q_constI, solver='SLSQP')
-    P_S, Q_S = gldZIP(V, s, Vn)
-    print('Finished constant impedance test.')
-    #**************************************************************************
-    # Constant power
-    S = np.ones_like(V) * 1+1j
-    P_constI = np.real(S)
-    Q_constI = np.imag(S)
-    m = zipFit(V, P_constI, Q_constI, solver='fmin_powell')
-    P_M, Q_M = gldZIP(V, m, Vn)
-    s = zipFit(V, P_constI, Q_constI, solver='SLSQP')
-    P_S, Q_S = gldZIP(V, s, Vn)
-    print('Finished constant power test.')
-    #**************************************************************************
-    # Mixture
-    # Constant impedance:
-    Z = 1+1j
-    I_z = V /Z
-    S_z = V * np.conjugate(I_z)
-    # Constant current:
-    I = 1+1j
-    S_i = V * np.conjugate(I)
-    # Constant power.
-    S_p = np.ones_like(V) * 1+1j
-    # Combine
-    S_tot = S_z + S_i + S_p
-    P_tot = np.real(S_tot)
-    Q_tot = np.imag(S_tot)
-    m = zipFit(V, P_tot, Q_tot, solver='fmin_powell')
-    P_M, Q_M = gldZIP(V, m, Vn)
-    s = zipFit(V, P_tot, Q_tot, solver='SLSQP')
-    P_S, Q_S = gldZIP(V, s, Vn)
-    print('Finished constant impedance test.')
-    
-    # TODO

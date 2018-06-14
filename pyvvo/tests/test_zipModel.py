@@ -65,6 +65,7 @@ S = 15000.12-230.25j
 testData.append((np.real(S), np.imag(S), 'Constant Power Test 2'))
 # CONSTANT POWER TEST 3 (exporting power)
 S = -234+42j
+testData.append((np.real(S), np.imag(S), 'Constant Power Test 3'))
 #******************************************************************************
 # MIXED TEST 1
 # Constant impedance:
@@ -142,6 +143,7 @@ class Test(unittest.TestCase):
                     else:
                         # Success.
                         msg = 'Success for {} with the {} solver.'
+                        print(msg.format(t[2], s))
                     
                     # Execute the test assertion.
                     self.assertTrue(result, msg.format(t[2], s))
