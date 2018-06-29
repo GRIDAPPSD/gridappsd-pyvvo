@@ -10,9 +10,11 @@ Notes from Dave:
 Augmented Lagrangian Adaptive Barrier Minimization
 '''
 import numpy as np
+import pandas as pd
 import math
 import mystic.solvers as my
 from scipy.optimize import minimize
+from sklearn.cluster import KMeans
 
 # Constant for ZIP coefficients. ORDER MATTERS!
 ZIPTerms = ['impedance', 'current', 'power']
@@ -252,3 +254,236 @@ def gldZIP(V, coeff, Vn):
     Q = Q_z + Q_i + Q_p
     
     return P, Q
+
+def cluster(data, nCluster=None, minClusterElements=4, maxTInCluster=2):
+    """Cluster data to aid in ZIP modeling.
+    
+    Clustering will performed on active power and time. Essentially, this
+        function decides whether there should be a seperate ZIP fit for each 
+        time interval in 'data,' or if some time intervals should be combined
+        for ZIP fitting.
+        
+    INPUTS
+    data: pandas dataframe with T, P, Q, and V columns. The T column should be
+        datetime64 and the index of the array.
+        P: real power
+        Q: reactive power
+        V: voltage magnitude
+        
+    nCluster: number of cluster to break the data up. If nCluster is None, the 
+        initial number of clusters will be computed based on the number of
+        unique 'minute timestamps' in data.
+        
+    minClusterElements: Minimum number of elements allowed in a cluster. If a
+        cluster has less than minClusterElements, the number of clusters will 
+        be reduced and clustering performed again.
+        
+    maxTInCluster: Maximum 'minute timestamps' allowed to be in a cluster. W
+    
+    OUTPUTS
+    labels: Returns the cluster "labels" which is a list of numbers indicating
+        the cluster number for each data element. Labels is guaranteed to be
+        one to one with data.
+    """
+    # Ensure our input data is adequately large.
+    if data.shape[0] < minClusterElements:
+        raise ValueError(('Rows in data ({}) is less than the minimum ' 
+                          + 'cluster size ({})').format(data.shape[0],
+                                                        minClusterElements))
+    
+    # Get minutes of each measurement
+    M = data.index.minute
+    
+    if nCluster is None:
+        nCluster = len(np.unique(M))
+
+    # Normalize P and M. This tends to force clustering to go along with the
+    # minutes.
+    
+    # normP = 1.0 ; normM = 1.0
+    normP = 1 / data['P'].max()
+    normM = 1 / max(M)
+    
+    # Create a pandas dataframe with normalized P and M
+    dClust = pd.DataFrame({'P': data['P'] * normP, 
+                           'M': M * normM})
+    
+    # Loop from nCluster down to 1 and perform K Means clustering. Note that
+    # we'll force a recluster if there are less than minClusterElements and if
+    # there are too many different times in a cluster
+    for k in range(nCluster, 0, -1):
+        # Initialize K means object.
+        KM = KMeans(n_clusters=k)
+        
+        # Perform the fit.
+        KM.fit(dClust)
+        
+        # Force recluster if there are too few elements in any cluster
+        if np.min(np.bincount(KM.labels_)) < minClusterElements:
+            # Move on to the next iteration of the loop (less clusters)
+            continue
+        
+        # Determine how many 'minute timestamps' fall into each cluster
+        tInClust = np.zeros(k)
+        for j in range(k):
+            tInClust[j] = len(np.unique(M[KM.labels_ == j]))
+        
+        # If we don't have too many times in a cluster, we're satisfied: break
+        # the loop.
+        if np.max(tInClust) <= maxTInCluster:
+            break
+    
+    # At the moment, we're using time as our primary predictor. If the same
+    # time interval is spread across multiple clusters, we need to recluster.
+    if np.max(tInClust) > maxTInCluster:
+        raise UserWarning('Failed to cluster: too many times in a cluster.')
+    
+    # At the cluster labels to the data and return it.
+    labels = np.array(KM.labels_)
+    
+    return labels
+    
+
+if __name__ == '__main__':
+    # Connect to the database.
+    import db
+    import matplotlib.pyplot as plt
+    dbObj = db.db(password='')
+    # We'll use the 'helper' for times
+    from helper import clock
+    # Times for "training" data
+    st = '2016-01-01 00:00:00'
+    et = '2016-01-15 00:00:00'
+    # timezone
+    tz = 'PST+8PDT'
+    # hour we'll use for fitting and predicting
+    hour = 9
+    
+    # Times for "prediction" data
+    stP = '2016-01-15 01:00:00'
+    etP = '2016-01-29 00:00:00'
+    
+    # Initialize a clock object for "traning" datetimes.
+    clockObjTrain = clock(startStr=st, finalStr=et,
+                     interval=3600,
+                     tzStr=tz)
+    
+    clockObjPred = clock(startStr=stP, finalStr=etP, 
+                         interval=3600,
+                         tzStr=tz)
+    
+    # nominal voltage
+    Vn=240
+    
+    # Table data is in
+    table = 'r2_12_47_2_ami_triplex_15_min'
+    # Node name
+    nodes = ['tpm0_R2-12-47-2_tm_1_R2-12-47-2_tn_193',
+             'tpm0_R2-12-47-2_tm_6_R2-12-47-2_tn_198',
+             'tpm0_R2-12-47-2_tm_11_R2-12-47-2_tn_203',
+             'tpm4_R2-12-47-2_tm_80_R2-12-47-2_tn_272',
+             'tpm0_R2-12-47-2_tm_187_R2-12-47-2_tn_379',
+             'tpm0_R2-12-47-2_tm_7_R2-12-47-2_tn_199',
+             'tpm6_R2-12-47-2_tm_32_R2-12-47-2_tn_224',
+             'tpm0_R2-12-47-2_tm_4_R2-12-47-2_tn_196',
+             'tpm1_R2-12-47-2_tm_22_R2-12-47-2_tn_214',
+             'tpm0_R2-12-47-2_tm_145_R2-12-47-2_tn_337',
+             'tpm2_R2-12-47-2_tm_29_R2-12-47-2_tn_221',
+             'tpm0_R2-12-47-2_tm_152_R2-12-47-2_tn_344',
+             'tpm1_R2-12-47-2_tm_136_R2-12-47-2_tn_328',
+             'tpm0_R2-12-47-2_tm_135_R2-12-47-2_tn_327',
+             'tpm2_R2-12-47-2_tm_137_R2-12-47-2_tn_329',
+             'tpm0_R2-12-47-2_tm_168_R2-12-47-2_tn_360'
+             ]
+    for node in nodes:
+        print('*'*80)
+        print('Node {}'.format(node))
+        # Get data for the node
+        d = dbObj.getTPQVForNode(table=table, node=node,
+                                 starttime=clockObjTrain.start_dt,
+                                 stoptime=clockObjTrain.final_dt)
+        
+        # Filter out data to get only weekdays at at 9a.m. hour
+        dFiltered = d.loc[(d.index.dayofweek >= 0) & (d.index.dayofweek <= 4) & \
+                      (d.index.hour == hour), :]
+        
+        # Cluster data.
+        labels = cluster(data=dFiltered)
+        
+        # Perform a ZIP fit for each cluster.
+        
+        # Grab unique set of labels
+        uLabels = np.unique(labels)
+        
+        # Initialize list to hold fit for each cluster
+        fits = []
+        
+        # Define solver to use.
+        #solver = 'fmin_powell'
+        solver = 'SLSQP'
+        
+        # Initialize arrays for tracking model estimates
+        Pest = np.zeros(dFiltered.shape[0])
+        Qest = np.zeros(dFiltered.shape[0])
+        
+        # Loop over each unique label and perform ZIP fit.
+        for k in uLabels:
+            # Grab labels equal to k for logical indexing
+            ind = labels == k
+            # Perform the ZIP fit
+            fits.append(zipFit(V=dFiltered['V'][ind], P=dFiltered['P'][ind],
+                               Q=dFiltered['Q'][ind], Vn=Vn, solver=solver))
+            # Evaluate the ZIP fit
+            Pest[ind], Qest[ind] = gldZIP(V=dFiltered['V'][ind], coeff=fits[-1],
+                                          Vn=Vn)
+            
+        # Compute the SSE for P and Q
+        SSEp = math.sqrt(np.sum((dFiltered['P'] - Pest)**2)/len(Pest))
+        SSEq = math.sqrt(np.sum((dFiltered['Q'] - Qest)**2)/len(Qest))
+        
+        print('\nTraining Error Estimate')
+        print('SSE(P) = ', SSEp, '  SSE(Q) = ', SSEq)
+        
+        # Plot fit
+        trainPlot = pd.DataFrame({'P':dFiltered['P'], 'Q':dFiltered['Q'],
+                                  'P_est':Pest, 'Q_est':Qest},
+                                  index=dFiltered.index)
+        trainPlot.plot(); plt.legend(loc='best'); plt.title('Training Data: {}'.format(node))
+        
+        # Test prediction
+        
+        # Get data for the node
+        d = dbObj.getTPQVForNode(table=table, node=node,
+                                 starttime=clockObjPred.start_dt,
+                                 stoptime=clockObjPred.final_dt)
+        
+        # Filter out data to get only weekdays at at 9a.m. hour
+        dFiltered = d.loc[(d.index.dayofweek >= 0) & (d.index.dayofweek <= 4) & \
+                      (d.index.hour == hour), :]
+        
+        # Initialize arrays for tracking model estimates
+        Pest = np.zeros(dFiltered.shape[0])
+        Qest = np.zeros(dFiltered.shape[0])
+        
+        # Loop over each unique label and perform ZIP fit.
+        for k in uLabels:
+            # Grab labels equal to k for logical indexing
+            ind = labels == k
+            # Evaluate the ZIP fit
+            Pest[ind], Qest[ind] = gldZIP(V=dFiltered['V'][ind], coeff=fits[-1],
+                                          Vn=Vn)
+            
+        # Compute the SSE for P and Q
+        SSEp = math.sqrt(np.sum((dFiltered['P'] - Pest)**2)/len(Pest))
+        SSEq = math.sqrt(np.sum((dFiltered['Q'] - Qest)**2)/len(Qest))
+        
+        print('\nPrediction Error Estimate')
+        print('SSE(P) = ', SSEp, '  SSE(Q) = ', SSEq)
+        
+        # Plot fit
+        predPlot = pd.DataFrame({'P':dFiltered['P'], 'Q':dFiltered['Q'],
+                                  'P_est':Pest, 'Q_est':Qest},
+                                  index=dFiltered.index)
+        predPlot.plot(); plt.legend(loc='best'); plt.title('Prediction Data {}'.format(node))
+        
+    plt.show()

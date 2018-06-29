@@ -5,3 +5,4 @@ SPARQLWrapper
 numpy
 scipy
 mystic
+scikit-learn

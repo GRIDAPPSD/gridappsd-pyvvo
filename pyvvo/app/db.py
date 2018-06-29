@@ -15,6 +15,8 @@ from helper import strRepDict
 import constants
 import time
 import datetime
+import numpy as np
+import pandas as pd
 
 # Define how we handle time bounds.
 LEFT_BOUND = '>='
@@ -455,6 +457,46 @@ class db:
             self.closeCnxnAndCursor(cnxn, cursor)
         
         return r[0]
+    
+    def getTPQVForNode(self, table, node,
+                       cols={'P': 'AMI_average_power_real',
+                             'Q': 'AMI_average_power_imag',
+                             'V': 'AMI_average_voltage12_mag'},
+                       nameCol='name', idCol='id', tCol='t', starttime=None,
+                       stoptime=None):
+        """Get time, power, and voltage data for AMI.
+        
+        WARNING: This method uses a "fetchall." If you pass a large timerange
+        and the data is granular, memory problems will ensue.
+        
+        """
+        q = ("SELECT {T} AS T, {P} AS P, {Q} AS Q, {V} AS V "
+             + "FROM {table}").format(T=tCol, P=cols['P'], Q=cols['Q'],
+                                      V=cols['V'], table=table)
+             
+        # Add time filter, and ID filter if applicable
+        q += self.getTimeAndIDFilter(starttime=starttime,
+                                     stoptime=stoptime, table=table, 
+                                     idCol=idCol, tCol=tCol,
+                                     nameCol=nameCol)
+        
+        # Add additional 'WHERE' filtering for the node
+        q += " AND {nameCol}='{node}'".format(nameCol=nameCol, node=node)
+        # Let's order by time.
+        q += " ORDER BY {tCol}".format(tCol=tCol)
+        
+        # Get connection. No need for the cursor, since we'll use pandas to query the db.
+        # TODO: Make method to just get cnxn.
+        cnxn, cursor = self.getCnxnAndCursor()
+        
+        try:
+            # Use pandas to read the data
+            out = pd.read_sql_query(sql=q, con=cnxn, index_col='T')
+        finally:
+            # Clean up.
+            self.closeCnxnAndCursor(cnxn, cursor)
+        
+        return out
     
     def fetchAll(self, table, cols, idCol='id', tCol='t', nameCol='name',
                  starttime=None, stoptime=None):
