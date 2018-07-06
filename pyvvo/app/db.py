@@ -498,6 +498,46 @@ class db:
         
         return out
     
+    def getTempAndFlux(self, table, cols={'temperature': 'temperature',
+                                          'solar_flux': 'solar_flux',},
+                       nameCol='name', idCol='id', tCol='t', starttime=None,
+                       stoptime=None):
+        """Get temperature and solar flux data from database.
+        
+        WARNING: This method uses a "fetchall." If you pass a large timerange
+        and the data is granular, memory problems will ensue.
+        
+        TODO: this could be upgraded using GROUP BY to perform aggregation
+        before we even pull the data out. See here: 
+        https://stackoverflow.com/questions/3086386/select-group-by-segments-of-time-10-seconds-30-seconds-etc
+        """
+        q = ("SELECT {T} as T, {temperature}, {solar_flux} "
+             + "FROM {table}").format(T=tCol, temperature=cols['temperature'],
+                                      solar_flux=cols['solar_flux'],
+                                      table=table)
+             
+        # Add time filter, and ID filter if applicable
+        q += self.getTimeAndIDFilter(starttime=starttime,
+                                     stoptime=stoptime, table=table, 
+                                     idCol=idCol, tCol=tCol,
+                                     nameCol=nameCol)
+        
+        # Let's order by time.
+        q += " ORDER BY {tCol}".format(tCol=tCol)
+        
+        # Get connection. No need for the cursor, since we'll use pandas to query the db.
+        # TODO: Make method to just get cnxn.
+        cnxn, cursor = self.getCnxnAndCursor()
+        
+        try:
+            # Use pandas to read the data
+            out = pd.read_sql_query(sql=q, con=cnxn, index_col='T')
+        finally:
+            # Clean up.
+            self.closeCnxnAndCursor(cnxn, cursor)
+        
+        return out
+    
     def fetchAll(self, table, cols, idCol='id', tCol='t', nameCol='name',
                  starttime=None, stoptime=None):
         """Function to read a table from the database. Returns a list of tuples.

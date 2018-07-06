@@ -9,9 +9,13 @@ Final adoption into application by Brandon Thayer.
 Notes from Dave:
 Augmented Lagrangian Adaptive Barrier Minimization
 '''
+# Standard library:
+import math
+import time
+
+# Installed packages:
 import numpy as np
 import pandas as pd
-import math
 import mystic.solvers as my
 from scipy.optimize import minimize
 from sklearn.cluster import KMeans
@@ -260,7 +264,7 @@ def cluster(data, nCluster=None, minClusterElements=4, maxTInCluster=2):
     
     Clustering will performed on active power and time. Essentially, this
         function decides whether there should be a seperate ZIP fit for each 
-        time interval in 'data,' or if some time intervals should be combined
+        time intervalSecond in 'data,' or if some time intervals should be combined
         for ZIP fitting.
         
     INPUTS
@@ -334,7 +338,7 @@ def cluster(data, nCluster=None, minClusterElements=4, maxTInCluster=2):
             break
     
     # At the moment, we're using time as our primary predictor. If the same
-    # time interval is spread across multiple clusters, we need to recluster.
+    # time intervalSecond is spread across multiple clusters, we need to recluster.
     if np.max(tInClust) > maxTInCluster:
         raise UserWarning('Failed to cluster: too many times in a cluster.')
     
@@ -342,7 +346,158 @@ def cluster(data, nCluster=None, minClusterElements=4, maxTInCluster=2):
     labels = np.array(KM.labels_)
     
     return labels
+
+def featureScale(x, xRef=None):
+    """Helper function to perform feature scaling.
     
+    INPUTS:
+    x: pandas DataFrame or Series.
+    xRef: reference pandas DataFrame.
+    
+    If only x is provided, x will be normalized against itself.
+    If xRef is additionally supplied, x will be normalized against xRef
+    
+    OUTPUTS:
+    xPrime: pandas DataFrame (or Series, depending on type of x). Each column
+        is scaled to that all values fall in the range [0, 1]
+    """
+    if xRef is None:
+        xRef = x
+    
+    xPrime = (x - xRef.min()) / (xRef.max() - xRef.min())
+    
+    # If an entire column is NaN, zero it out.
+    if len(xPrime.shape) > 1:
+        # Pandas Dataframe
+        NaNSeries = xPrime.isnull().all()
+    elif len(xPrime.shape) == 1:
+        # Pandas Series
+        NaNSeries = xPrime.isnull()
+    
+    # Loop and zero out.    
+    for index, value in NaNSeries.iteritems():
+        if value:
+            xPrime[index] = 0
+    
+    return xPrime
+
+def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
+                       solver='SLSQP'):
+    """
+    
+    INPUTS:
+    data: pandas DataFrame containing the data to be used for clustering.
+    presentConditions: pandas Series containing data for selecting a cluster
+    minClusterSize: integer defining the smallest number of data points allowed
+        in a cluster that will be used to perform a ZIP fit.
+    """
+    # Compute maximum possible clusters:
+    n = np.floor(data.shape[0] / minClusterSize).astype(int)
+    
+    # Match up columns in data and presentConditions for in determining which
+    # cluster to use.
+    useCol = []
+    excludeColInd = []
+    for colInd, colName in enumerate(data.columns):
+        if colName not in presentConditions.index:
+            # This column shouldn't be used when determining which cluster to
+            # use for fitting.
+            excludeColInd.append(colInd)
+        else:
+            useCol.append(colName)
+            
+    # Ensure presentConditions is in the same order as 'data'
+    presentConditions = presentConditions[useCol]
+    
+    # Normalize 'data'
+    dNorm = featureScale(x=data)
+    
+    # Normalize presentConditions for finding the right cluster.
+    pc = featureScale(x=presentConditions, xRef=data.loc[:, useCol])
+    
+    # Initialize variables for tracking our best fit.
+    bestCoeff = None
+    minRMSD = np.inf
+    
+    # Loop over cluster counts from highest to lowest.
+    for k in range(n, 0, -1):
+        # Initalize K Means cluster object.
+        KM = KMeans(n_clusters=k)
+    
+        # Perform the clustering.
+        KM.fit(dNorm)
+        
+        # Grab cluster centers.
+        centers = KM.cluster_centers_
+        
+        # Remove the P and Q information.
+        centers = np.delete(centers, excludeColInd, axis=1)
+        
+        # Use squared Euclidean distance to pick a center.
+        minDistance = np.inf
+        bestLabel = None
+        
+        for rowInd in range(centers.shape[0]):
+            sqDist = ((pc - centers[rowInd])**2).sum()
+            
+            # Update min as necessary
+            if sqDist < minDistance:
+                minDistance = sqDist.sum()
+                bestLabel = rowInd
+            
+        # If this cluster doesn't have enough data in it, move along.
+        u, c = np.unique(KM.labels_, return_counts=True)
+        if c[u == bestLabel] < minClusterSize:
+            continue
+        
+        # Extract data to perform fit.
+        fitData = data.loc[KM.labels_ == bestLabel, ['P', 'Q', 'V']]
+        
+        fitOutputs = fitAndEvaluate(fitData=fitData, Vn=Vn, solver=solver)
+        
+        # Should we consider the sum of these errors? Only look at P? 
+        rmsd = fitOutputs['rmsdP'] + fitOutputs['rmsdQ']
+        
+        # Track if this is the best so far.
+        if rmsd < minRMSD:
+            minRMSD = rmsd
+            minRMSDP = fitOutputs['rmsdP']
+            minRMSDQ = fitOutputs['rmsdQ']
+            # Pout = Pest.copy(deep=True)
+            # Qout = Qest.copy(deep=True)
+            # bestCoeff = copy.deepcopy(coeff)
+            bestCoeff = fitOutputs['coeff']
+            
+    return bestCoeff, minRMSDP, minRMSDQ
+
+def fitAndEvaluate(fitData, Vn, solver):
+    """Helper to perform and evaluate ZIP fit.
+    
+    INPUTS: 
+    fitData: pandas DataFrame with P, Q, and V columns
+    Vn: nominal voltage
+    solver: solver to use
+    """
+    # Perform ZIP fit.
+    coeff = zipFit(V=fitData['V'], P=fitData['P'],
+                    Q=fitData['Q'], Vn=Vn, solver=solver)
+        
+    # Evaluate the ZIP fit
+    Pest, Qest = gldZIP(V=fitData['V'], coeff=coeff, Vn=Vn)
+        
+    # Compute the root mean square deviation
+    rmsdP = computeRMSD(fitData['P'], Pest)
+    rmsdQ = computeRMSD(fitData['Q'], Qest)
+    
+    return {'coeff': coeff, 'Pest': Pest, 'Qest': Qest, 'rmsdP': rmsdP, 
+            'rmsdQ': rmsdQ}
+
+        
+def computeRMSD(actual, predicted):
+    """Root-mean-square deviation.
+    """
+    out = math.sqrt(np.sum((actual - predicted)**2)/len(actual))
+    return out
 
 if __name__ == '__main__':
     # Connect to the database.
@@ -351,32 +506,33 @@ if __name__ == '__main__':
     dbObj = db.db(password='')
     # We'll use the 'helper' for times
     from helper import clock
-    # Times for "training" data
-    st = '2016-01-01 00:00:00'
-    et = '2016-01-15 00:00:00'
+    # Times for performing fitting.
+    st = '2016-01-15 00:15:00'
+    et = '2016-01-22 00:15:00'
     # timezone
     tz = 'PST+8PDT'
-    # hour we'll use for fitting and predicting
-    hour = 9
     
-    # Times for "prediction" data
-    stP = '2016-01-15 01:00:00'
-    etP = '2016-01-29 00:00:00'
+    # Define our data interval (15 minutes).
+    intervalMinute = 15
+    intervalSecond = intervalMinute*60
+    
+    # Use a two week window for grabbing historic data
+    window = 60*60*24*7*2
     
     # Initialize a clock object for "traning" datetimes.
-    clockObjTrain = clock(startStr=st, finalStr=et,
-                     interval=3600,
-                     tzStr=tz)
-    
-    clockObjPred = clock(startStr=stP, finalStr=etP, 
-                         interval=3600,
-                         tzStr=tz)
+    clockObj = clock(startStr=st, finalStr=et,
+                     interval=intervalSecond,
+                     tzStr=tz, window=window)
     
     # nominal voltage
     Vn=240
     
+    # solver to use 
+    solver='SLSQP'
+    
     # Table data is in
     table = 'r2_12_47_2_ami_triplex_15_min'
+    climateTable = 'r2_12_47_2_ami_climate_1_min'
     # Node name
     nodes = ['tpm0_R2-12-47-2_tm_1_R2-12-47-2_tn_193',
              'tpm0_R2-12-47-2_tm_6_R2-12-47-2_tn_198',
@@ -395,6 +551,192 @@ if __name__ == '__main__':
              'tpm2_R2-12-47-2_tm_137_R2-12-47-2_tn_329',
              'tpm0_R2-12-47-2_tm_168_R2-12-47-2_tn_360'
              ]
+    
+    # Initialize some data frames for holding results.
+    outDfList = []
+    for _ in range(3):
+        outDfList.append(pd.DataFrame())
+        
+    # Hard-code output names
+    outDfNames = ['cluster', 'oneHour', 'fifteenMin']
+    
+    # Loop over time to perform fits and predictions.
+    while clockObj.stillTime():
+        
+        # Get climate data for the time in question. We need to reach back by
+        # one intervalSecond so that things are correct when we resample.
+        climateStart = clockObj.timeDiff(tStr='windowStart',
+                                         delta=(-1*intervalSecond))
+        climateStop = clockObj.timeDiff(tStr='windowStop',
+                                        delta=(-1*intervalSecond))
+        
+        climateData = dbObj.getTempAndFlux(table=climateTable,
+                                           starttime=climateStart,
+                                           stoptime=climateStop)
+        
+        # Resample to get mean climate data over each 15 minute intervalSecond. This
+        # should match up with how AMI averages are computed (data before the
+        # stamped time is used to create the average)
+        climateData = climateData.resample((str(intervalMinute) + 'Min'),
+                                           label='right').mean()
+                                           
+        # Determine whether we're in a weekday or weekend, grab an inclusive 
+        # range to use.
+        dayRange = clockObj.dayOfWeekRange()
+        
+        # Get boolean filters for time.
+        
+        # Filter out data to get weekdays at our given hour, +/- 2 intervals.
+        lowerTime = clockObj.timeDiff('start', -2*intervalSecond).time()
+        upperTime = clockObj.timeDiff('start', 2*intervalSecond).time()
+
+        # Get logical for all days which are of the same type (weekday vs
+        # weekend)
+        DoWBool = (climateData.index.dayofweek >= dayRange[0]) & \
+            (climateData.index.dayofweek <= dayRange[1])
+        # Get logical to ensure we're in the time bounds.
+        upperBool = climateData.index.time <= upperTime
+        lowerBool = climateData.index.time >= lowerTime
+        
+        # Determine how to combine the upper and lower booleans.
+        if lowerTime > upperTime:
+            # Our times are crossing over the day boundary, need to use 'or.'
+            timeFilter = upperBool | lowerBool
+        elif lowerTime < upperTime:
+            # Times do not cross day boundary. Use 'and.'
+            timeFilter = upperBool & lowerBool
+        else:
+            raise UserWarning('Unexpected behavior... Times are equal...')
+        
+        # Construct overall time filter.
+        overallFilter = DoWBool & timeFilter
+        
+        # Construct a second time filter to only use data with the same hour
+        # and minute stamp.
+        dayMinHourFilter = DoWBool & \
+            (climateData.index.minute == clockObj.times['start']['asTZ'].minute) & \
+            (climateData.index.hour == clockObj.times['start']['asTZ'].hour)
+        
+        # Grab times to use for this interval
+        windowStart, windowEnd = clockObj.getWindow()
+        clockStart, clockStop = clockObj.getStartStop()
+        
+        minNodeTime = np.inf
+        nodeTime = 0
+        maxNodeTime = 0
+        
+        # Loop over the nodes.
+        for node in nodes:
+            t0 = time.time()
+            # Grab data for the node.
+            '''
+            d = dbObj.getTPQVForNode(table=table, node=node,
+                                     starttime=windowStart,
+                                     stoptime=windowEnd)
+            '''
+            
+            # NOTE: for this experiment we'll be grabbing one extra row of
+            # data for validation.
+            d = dbObj.getTPQVForNode(table=table, node=node,
+                                     starttime=windowStart,
+                                     stoptime=clockStart)
+            
+            # Grab the data for which we're trying to predict.
+            dActual = d.iloc[-1]
+            # Drop it from the dataframe so we don't include it in our fitting.
+            d = d.drop(dActual.name)
+            
+
+            # Associate climate data.
+            d = d.merge(climateData, how='outer', on='T')
+            
+            # Filter data by time.
+            dFiltered = d.loc[overallFilter, :]
+            
+            # Grab a subset of the data for our 'present conditions'
+            # TODO: this should be seperate from the data that goes into the fit.
+            # The way this is done now is just a temporary measure to step through
+            # the code.
+            pc = dFiltered.iloc[-1].loc[['V', 'temperature', 'solar_flux']]
+            
+            # Initialize list to hold output data
+            outList = []
+        
+            # Cluster by P, Q, V, temp, and solar flux, then perform a ZIP fit.
+            coeff, rmsdP, rmsdQ = findBestClusterFit(data=dFiltered,
+                                                     presentConditions=pc,
+                                                     minClusterSize=4,
+                                                     Vn=Vn, solver=solver)
+            
+            # Use these coefficients to predict the next time interval.
+            Pest, Qest = gldZIP(V=dActual['V'], coeff=coeff, Vn=Vn)
+            outList.append((Pest, Qest, coeff))
+            
+            # Perform a fit without clustering.
+            results = fitAndEvaluate(fitData=dFiltered, Vn=Vn, solver=solver)
+            Pest2, Qest2 = gldZIP(V=dActual['V'], coeff=results['coeff'],Vn=Vn)
+            outList.append((Pest2, Qest2, results['coeff']))
+            
+            # Perform a fit with only data for the same hour and minute
+            dayMinHourData = d.loc[dayMinHourFilter, ['P', 'Q', 'V']]
+            resultsDayMinHour = fitAndEvaluate(fitData=dayMinHourData,
+                                               Vn=Vn, solver=solver)
+            
+            Pest3, Qest3 = gldZIP(V=dActual['V'],
+                                  coeff=resultsDayMinHour['coeff'], Vn=Vn)
+            outList.append((Pest3, Qest3, resultsDayMinHour['coeff']))
+            
+            # Loop over the outList and get data into DataFrames.
+            for index, element in enumerate(outList):
+                
+                # Grab time, voltage, P, and Q, node
+                dataDict = {'T': clockObj.times['start']['str'], 'node': node,
+                            'V': dActual['V'],
+                            'P_actual': dActual['P'], 'Q_actual': dActual['Q'],
+                            'P_estimate': element[0],
+                            'Q_estimate': element[1]}
+                
+                # Loop and add coefficients
+                for key, item in element[2].items():
+                    # No need to add the polynomials or fit error.
+                    if (key == 'poly') or (key == 'error'):
+                        continue
+                    
+                    # Add the item.
+                    dataDict[key] = item
+                    
+                # Append to the dataframe
+                outDfList[index] = outDfList[index].append(other=dataDict,
+                                                           ignore_index=True)
+                
+                #outDfList[index].append(dataDict)
+            
+            # Timing stuff.  
+            t1 = time.time()
+            tDiff = t1 - t0
+            if tDiff < minNodeTime:
+                minNodeTime = tDiff
+            
+            if tDiff > maxNodeTime:
+                maxNodeTime = tDiff
+                
+            nodeTime += tDiff
+            
+            
+        # Advance clock.
+        print('Done with time {}. Avg. time: {:.2f}, Min. time: {:.2f}, Max. time: {:.2f}'.format(clockObj.times['start']['str'],
+                                                                                                     nodeTime/len(nodes),
+                                                                                                     minNodeTime,
+                                                                                                     maxNodeTime),
+                                                                                                     flush=True)
+        clockObj.advanceTime()
+        
+    # Write results to file.
+    for index, df in enumerate(outDfList):
+        df.to_csv(outDfNames[index] + '.csv')
+        
+    
+    '''
     for node in nodes:
         print('*'*80)
         print('Node {}'.format(node))
@@ -403,9 +745,33 @@ if __name__ == '__main__':
                                  starttime=clockObjTrain.start_dt,
                                  stoptime=clockObjTrain.final_dt)
         
-        # Filter out data to get only weekdays at at 9a.m. hour
+        # Associate climate data.
+        d = d.merge(climateData, how='outer', on='T')
+        
+        # Drop rows with
+        
+        # Filter out data to get weekdays at our given hour, +/- 2 intervals.
+        # Get minute bounds.
+        upperMinute = (hour * 60 + 2*intervalSecond)
+        lowerMinute = (hour * 60 - 2*intervalSecond)
         dFiltered = d.loc[(d.index.dayofweek >= 0) & (d.index.dayofweek <= 4) & \
-                      (d.index.hour == hour), :]
+                          ((d.index.hour * 60 + d.index.minute) <= upperMinute) & \
+                          ((d.index.hour * 60 + d.index.minute) >= lowerMinute), :]
+        
+        # Grab a subset of the data for our 'present conditions'
+        # TODO: this should be seperate from the data that goes into the fit.
+        # The way this is done now is just a temporary measure to step through
+        # the code.
+        pc = dFiltered.iloc[-1].loc[['V', 'temperature', 'solar_flux']]
+        
+        coeff, rmsdP, rmsdQ, Pest, Qest = findBestClusterFit(data=dFiltered,
+                                                           presentConditions=pc,
+                                                           minClusterSize=4,
+                                                           Vn=240,
+                                                           solver='SLSQP')
+        
+        print('\nTraining Error for PQVTempS Clustering:')
+        print('SSE(P) = ', rmsdP, '  SSE(Q) = ', rmsdQ)
         
         # Cluster data.
         labels = cluster(data=dFiltered)
@@ -441,7 +807,7 @@ if __name__ == '__main__':
         SSEp = math.sqrt(np.sum((dFiltered['P'] - Pest)**2)/len(Pest))
         SSEq = math.sqrt(np.sum((dFiltered['Q'] - Qest)**2)/len(Qest))
         
-        print('\nTraining Error Estimate')
+        print('\nTraining Error for P/Time Clustering')
         print('SSE(P) = ', SSEp, '  SSE(Q) = ', SSEq)
         
         # Plot fit
@@ -487,3 +853,4 @@ if __name__ == '__main__':
         predPlot.plot(); plt.legend(loc='best'); plt.title('Prediction Data {}'.format(node))
         
     plt.show()
+    '''

@@ -16,6 +16,10 @@ import copy
 RECT_EXP = re.compile(r'[+-]*([0-9])+(\.)*([0-9])*(e[+-]*([0-9])+)*[+-]([0-9])+(\.)*([0-9])*(e[+-]([0-9])+)*j')
 FIRST_EXP = re.compile(r'[+-]*([0-9])+(\.)*([0-9])*(e[+-]*([0-9])+)*')
 SECOND_EXP = re.compile(r'[+-]*([0-9])+(\.)*([0-9])*(e[+-]*([0-9])+)*[dr]')
+
+# Weekday and weekend bounds, inclusive
+WEEKDAY = (0, 4)
+WEEKEND = (5, 6)
    
 def getComplex(s):
     """Function to take a string which represents a complex number and convert
@@ -434,7 +438,7 @@ class clock():
     """Class to handle advancing simulation times, being careful with tz's and
     DST.
     """
-    def __init__(self, startStr, finalStr, interval, tzStr=None):
+    def __init__(self, startStr, finalStr, interval, tzStr=None, window=None):
         """clock constructor.
         
         Don't include tzStr if the given times have timezone designations
@@ -445,6 +449,9 @@ class clock():
         Times should be in the same timezone
         
         Times should be in util/constants.DATE_FMT or DATE_TZ_FMT
+        
+        window: Used to construct a time window which is less one interval
+            from the present start time, and 'window' seconds wide.
         """
         # NOTE: we could do some looping instead of writing each line three
         # times, but do we really get any gain for something this simple? I
@@ -453,42 +460,123 @@ class clock():
         # store interval
         self.interval = interval
         
+        # Initialize dictionary to hold times.
+        self.times = dict()
+        
         # convert strings to datetime
-        self.start_dt = tsToDT(startStr, tzStr)
-        self.final_dt = tsToDT(finalStr, tzStr)
+        self.times['start'] = dict()
+        self.times['start']['asTZ'] = tsToDT(startStr, tzStr)
+        self.times['final'] = dict()
+        self.times['final']['asTZ'] = tsToDT(finalStr, tzStr)
         
         # Set timezone property.
-        assert self.start_dt.tzinfo == self.final_dt.tzinfo
-        self.tzinfo = self.start_dt.tzinfo
-        
+        assert self.times['start']['asTZ'].tzinfo \
+            == self.times['final']['asTZ'].tzinfo
+        self.tzinfo = self.times['start']['asTZ'].tzinfo
                                       
         # Get UTC dates.
-        self.start_utc = self.start_dt.astimezone(dateutil.tz.tzutc())
-        self.final_utc = self.final_dt.astimezone(dateutil.tz.tzutc())
-        
+        self.times['start']['utc'] = \
+            self.times['start']['asTZ'].astimezone(dateutil.tz.tzutc())
+        self.times['final']['utc'] = \
+            self.times['final']['asTZ'].astimezone(dateutil.tz.tzutc())
+            
         # Get the 'stop' time as start + interval
-        self.stop_utc = self.start_utc + datetime.timedelta(seconds=interval)
-        self.stop_dt = self.stop_utc.astimezone(self.tzinfo)
-                              
+        self.times['stop'] = dict()
+        self.times['stop']['utc'] = self.times['start']['utc'] + \
+            datetime.timedelta(seconds=self.interval)
+        self.times['stop']['asTZ'] = \
+            self.times['stop']['utc'].astimezone(self.tzinfo)
+        
+        # Window.
+        if window is not None:
+            # Create window.
+            self.times['windowStart'] = dict()
+            self.times['windowStop'] = dict()
+            self.times['windowStart']['utc'] = \
+                (self.times['start']['utc'] \
+                 - datetime.timedelta(seconds=window))
+            
+            self.times['windowStop']['utc'] = (self.times['start']['utc'] \
+                                               - datetime.timedelta(seconds=interval))
+            
+            # Get times in timezone
+            self.times['windowStart']['asTZ'] = \
+                self.times['windowStart']['utc'].astimezone(self.tzinfo)
+            self.times['windowStop']['asTZ'] = \
+                self.times['windowStop']['utc'].astimezone(self.tzinfo)
+            
         # Get string representations
-        self.start_str = self.start_dt.strftime(constants.DATE_TZ_FMT)
-        self.stop_str = self.stop_dt.strftime(constants.DATE_TZ_FMT)
-        self.final_str = self.final_dt.strftime(constants.DATE_TZ_FMT)
+        for t in self.times:
+            self.times[t]['str'] = \
+                self.times[t]['asTZ'].strftime(constants.DATE_TZ_FMT)
         
     def advanceTime(self):
         """Simple function to move the time forward some number of seconds
         """
-        # Bump each utc time.
-        self.start_utc += datetime.timedelta(seconds=self.interval)
-        self.stop_utc += datetime.timedelta(seconds=self.interval)
+        # Bump all times except final.
+        for t in self.times:
             
-        # Update times in their own timezones
-        self.start_dt = self.start_utc.astimezone(self.tzinfo)
-        self.stop_dt = self.stop_utc.astimezone(self.tzinfo)
+            if t == 'final':
+                continue
+            
+            # Bump UTC.
+            self.times[t]['utc'] += datetime.timedelta(seconds=self.interval)
+            # Update in timezone.
+            self.times[t]['asTZ'] = \
+                self.times[t]['utc'].astimezone(self.tzinfo)
+            # Update string.
+            self.times[t]['str'] = \
+                self.times[t]['asTZ'].strftime(constants.DATE_TZ_FMT)
         
-        # Update the strings
-        self.start_str = self.start_dt.strftime(constants.DATE_TZ_FMT)
-        self.stop_str = self.stop_dt.strftime(constants.DATE_TZ_FMT)
+    def dayOfWeekRange(self):
+        """Return day of week range for present start_dt.
+        """
+        dayNum = self.times['start']['asTZ'].weekday()
+        if (dayNum <= WEEKDAY[1]) and (dayNum >= WEEKDAY[0]):
+            return WEEKDAY
+        elif (dayNum <= WEEKEND[1]) and (dayNum >= WEEKEND[0]):
+            return WEEKEND
+        else:
+            raise ValueError('Bad day!')
+        
+    def stillTime(self):
+        """Check to see if there's still time.
+        """
+        if self.times['stop']['utc'] <= self.times['final']['utc']:
+            return True
+        else:
+            return False
+        
+    def getStartStop(self):
+        """Convenience function to get start and stop times in their timezones
+        """
+        s = self.times['start']['asTZ']
+        e = self.times['stop']['asTZ']
+        return s, e
+    
+    def getWindow(self):
+        """Convenience function for grabbing start and end of the window.
+        """
+        ws = self.times['windowStart']['asTZ']
+        we = self.times['windowStop']['asTZ']
+        
+        return ws, we
+        
+    def timeDiff(self, tStr, delta):
+        """Return a time difference from one of the given times.
+        
+        INPUTS:
+        tStr: string, either 'start,' 'stop,' 'final,' 'windowStart,' or 
+            'windowStop' (if window was set upon clock initialization)
+        delta: time difference in seconds. Use a positive or negative number.
+        
+        OUTPUTS:
+        t: time in time zone.
+        """
+        t = (self.times[tStr]['utc'] \
+             + datetime.timedelta(seconds=delta)).astimezone(self.tzinfo)
+             
+        return t
         
 class strRepDict(dict):
     """Class which can be used for only string formatting a portion of named
