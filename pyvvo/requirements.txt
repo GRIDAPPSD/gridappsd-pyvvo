@@ -6,3 +6,5 @@ numpy
 scipy
 mystic
 scikit-learn
+pandas
+matplotlib
