@@ -310,7 +310,7 @@ def featureScale(x, xRef=None):
     return xPrime
 
 def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
-                       solver='SLSQP', randomState=None):
+                       solver='SLSQP', randomState=None, poly=None):
     """
     
     INPUTS:
@@ -318,6 +318,10 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
     presentConditions: pandas Series containing data for selecting a cluster
     minClusterSize: integer defining the smallest number of data points allowed
         in a cluster that will be used to perform a ZIP fit.
+    Vn: nominal voltage 
+    solver: solver (in SOLVERS) to use
+    randomState: numpy random.randomState object for reproducable experiments.
+    poly: polynomial to use for starting conditions for the ZIP fit.
     """
     # Compute maximum possible clusters:
     n = np.floor(data.shape[0] / minClusterSize).astype(int)
@@ -381,7 +385,8 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
         # Extract data to perform fit.
         fitData = data.loc[KM.labels_ == bestLabel, ['P', 'Q', 'V']]
         
-        fitOutputs = fitAndEvaluate(fitData=fitData, Vn=Vn, solver=solver)
+        fitOutputs = fitAndEvaluate(fitData=fitData, Vn=Vn, solver=solver, 
+                                    poly=poly)
         
         # Should we consider the sum of these errors? Only look at P? 
         rmsd = fitOutputs['rmsdP'] + fitOutputs['rmsdQ']
@@ -398,17 +403,22 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
             
     return bestCoeff, minRMSDP, minRMSDQ
 
-def fitAndEvaluate(fitData, Vn, solver):
+def fitAndEvaluate(fitData, Vn, solver, poly=None):
     """Helper to perform and evaluate ZIP fit.
     
     INPUTS: 
     fitData: pandas DataFrame with P, Q, and V columns
     Vn: nominal voltage
     solver: solver to use
+    poly: starting condition polynomial values for the fit. If None, the 
+        constant PAR0 will be used.
     """
+    if poly is None:
+        poly = PAR0
+    
     # Perform ZIP fit.
     coeff = zipFit(V=fitData['V'], P=fitData['P'],
-                    Q=fitData['Q'], Vn=Vn, solver=solver)
+                    Q=fitData['Q'], Vn=Vn, solver=solver, par0=poly)
         
     # Evaluate the ZIP fit
     Pest, Qest = gldZIP(V=fitData['V'], coeff=coeff, Vn=Vn)
@@ -444,6 +454,8 @@ def fitForNode(dbObj, dataIn, randomState=None):
         Vn: nominal voltage for the given node.
         solver: solver to use for performing the ZIP fit. Should be in
             the SOLVERS constant.
+        poly: polynomial for previous fit for this node. If None, PAR0 constant
+            will be used (set later down the function chain).
             
         OPTIONAL/DEPENDENT FIELDS:
         
@@ -548,7 +560,7 @@ def fitForNode(dbObj, dataIn, randomState=None):
             findBestClusterFit(data=d, presentConditions=pc,
                                minClusterSize=dataIn['minClusterSize'],
                                Vn=dataIn['Vn'], solver=dataIn['solver'],
-                               randomState=randomState)
+                               randomState=randomState, poly=dataIn['poly'])
         
         # Put outputs in the outDict.
         outDict['rmsdP_train'] = rmsdP
@@ -557,7 +569,8 @@ def fitForNode(dbObj, dataIn, randomState=None):
     
     else:
         # No clustering, just fit.
-        fitOutputs = fitAndEvaluate(fitData=d, Vn=Vn, solver=solver)
+        fitOutputs = fitAndEvaluate(fitData=d, Vn=Vn, solver=solver, 
+                                    poly=dataIn['poly'])
         # Put outputs in the outDict.
         outDict['rmsdP_train'] = fitOutputs['rmsdP']
         outDict['rmsdQ_train'] = fitOutputs['rmsdQ']
@@ -688,8 +701,8 @@ if __name__ == '__main__':
     # We'll use the 'helper' for times
     from helper import clock
     # Times for performing fitting.
-    st = '2016-06-01 00:00:00'
-    et = '2016-06-01 00:15:00'
+    st = '2016-06-01 12:00:00'
+    et = '2016-06-01 14:00:00'
     # timezone
     tz = 'PST+8PDT'
     
@@ -712,7 +725,8 @@ if __name__ == '__main__':
     Vn=240
     
     # solver to use 
-    solver='fmin_powell'
+    # solver='fmin_powell'
+    solver = 'SLSQP'
     
     # Table data is in
     table = 'r2_12_47_2_ami_triplex_15_min'
@@ -740,7 +754,7 @@ if __name__ == '__main__':
     outDf = pd.DataFrame
         
     # Hard-code output names
-    outDfName = 'cluster'
+    outDfName = 'cluster' + '_' + solver
     
     # Initialize queues for parallelization.
     inQ = JoinableQueue()
@@ -758,6 +772,10 @@ if __name__ == '__main__':
     
     # Flag for writing headers to file.
     headerFlag=True
+    
+    # Initialize dictionary for tracking previous fits to use as a starting
+    # condition for the next fit.
+    prevPoly = {}
     
     # Loop over time to perform fits and predictions.
     while clockObj.stillTime():
@@ -804,11 +822,18 @@ if __name__ == '__main__':
         
         # Loop over the nodes.
         for node in nodes:
+            # Grab previous polynomial (if it's been set)
+            try:
+                poly = prevPoly[node]
+            except KeyError:
+                poly = None
+            
             # Put dictionary in the queue for processing.
             inQ.put({'table': table, 'node': node, 'starttime': windowStart,
                      'stoptime': clockStart, 'cluster': True, 'mode': 'test',
                      'timeFilter': timeFilter, 'climateData': climateData,
-                     'minClusterSize': 4, 'Vn': Vn, 'solver': solver})
+                     'minClusterSize': 4, 'Vn': Vn, 'solver': solver,
+                     'poly': poly})
             
         # Wait for the work to be done.
         inQ.join()
@@ -829,12 +854,16 @@ if __name__ == '__main__':
                 thisData['T'] = clockObj.times['start']['str']
                 # Flatten the 'coeff' return, exclude stuff we don't want
                 for key, item in thisData['coeff'].items():
-                    if (key == 'poly') or (key == 'error'):
+                    if key == 'poly':
+                        # Track the previous polynomial.
+                        prevPoly[node] = thisData['coeff']['poly']
+                    elif key == 'error':
+                        # No need to track optimization error.
                         continue
                     
                     # Add the item.
                     thisData[key] = item
-                    
+                
                 # Remove the 'coeff' item.
                 # TODO: Track previous 'poly' to use as initial conditions for
                 # the next fit.
