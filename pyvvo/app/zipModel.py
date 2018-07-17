@@ -126,7 +126,7 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
         if not sol.success:
             # Failed to solve. For now, just print.
             # TODO: handle failures.
-            print('SLSQP failed.')
+            print('SLSQP failed: {}'.format(sol.message))
     else:
         raise UserWarning('Given solver, {}, is not implemented.'.format(solver))
         
@@ -155,15 +155,42 @@ def estimateNominalPower(P, Q):
     return Sn
 
 def ZIPObjective(Params, Vbar, Pbar, Qbar):
-    """Objective function for minimization. Minimize squared error."""
+    """Objective function for minimization.
+    
+    Minimize squared error of the ZIP polynomial.
+    """
     a1, a2, a3, b1, b2, b3 = Params
     return sum( (Pbar - (a1*(Vbar*Vbar)+a2*Vbar+a3))**2
                + (Qbar - (b1*(Vbar*Vbar)+b2*Vbar+b3))**2 )/len(Vbar)
     
 def ZIPConstraint(Params):
-    """Constraint for ZIP modeling - """
+    """Constraint for ZIP modeling. Ensure "fractions" add up to one.
+    
+    a1, b1 = Z%cos(thetaZ), Z%sin(thetaZ)
+    a2, b2 = I%cos(thetaI), I%sin(thetaI)
+    a3, b3 = P%cos(thetaP), P%sin(thetaP)
+    """
+    # Extract parameters from tuple.
     a1, a2, a3, b1, b2, b3 = Params
-    return math.sqrt(a1*a1 + b1*b1) + math.sqrt(a2*a2 + b2*b2) + math.sqrt(a3*a3 + b3*b3) - 1.0
+    
+    # Derive power factors/fractions from the polynomial coefficients.
+    coeff = polyToGLD((a1, a2, a3), (b1, b2, b3))
+    
+    # Return the sum of the fractions, minus 1 (optimization solvers call this
+    # function as a constraint, and consider it "satisfied" if it returns 0).
+    return coeff['impedance_fraction'] + coeff['current_fraction'] + \
+        coeff['power_fraction'] - 1
+        
+    """
+    NOTE: code below is what we were originally doing. After switching to the 
+    code above (call polyToGLD, get fractions, sum), we saw the optimization 
+    routines doing a much better job meeting the constraint.
+    # Use sin^2(theta) + cos^2(theta) = 1 identity to extract fractions, sum
+    # them up, subtract 1.
+    return math.sqrt(a1*a1 + b1*b1) + math.sqrt(a2*a2 + b2*b2) + \
+        math.sqrt(a3*a3 + b3*b3) - 1.0
+    """
+    
 
 def polyToGLD(p, q):
     """Takes polynomial ZIP coefficients and converts them to GridLAB-D format.
@@ -201,7 +228,9 @@ def polyToGLD(p, q):
             # If we divided by zero, simply make the power factor 1
             pf = 1
             
-        # match what is done in Gridlab-D
+        # match what is done in Gridlab-D.
+        # TODO: update so we aren't flipping the fraction here? We should
+        # probably instead use a negative Sn if the "load" is exporting power.
         if p[i] > 0 and q[i] < 0:
             # Leading power factor
             pf *= -1
@@ -231,10 +260,6 @@ def gldZIP(V, coeff, Vn):
     Check out the 'triplex_load_update_fxn()' in:
     https://github.com/gridlab-d/gridlab-d/blob/master/powerflow/triplex_load.cpp
     """
-    # GridLAB-D adjusts coefficients if they don't exactly add to one. Here's a
-    # line from triplex_load.cpp:
-    # 
-    # power_fraction[0] = 1 - current_fraction[0] - impedance_fraction[0];
     
     '''
     # GridLAB-D forces the coefficients to sum to 1 if they don't exactly. This screws things up. 
@@ -354,6 +379,9 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
     # Loop over cluster counts from highest to lowest.
     for k in range(n, 0, -1):
         # Initalize K Means cluster object.
+        # TODO: Set this up to run in a multi-threaded manner.
+        # https://stackoverflow.com/questions/38601026/easy-way-to-use-parallel-options-of-scikit-learn-functions-on-hpc
+        # https://github.com/scikit-learn/scikit-learn/blob/ed5e127b2460b94dbf3398d97990cb54f188d360/sklearn/externals/joblib/parallel.py
         KM = KMeans(n_clusters=k, random_state=randomState)
     
         # Perform the clustering.
