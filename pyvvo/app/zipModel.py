@@ -13,6 +13,7 @@ Augmented Lagrangian Adaptive Barrier Minimization
 import math
 from multiprocessing import Process, Queue, JoinableQueue, cpu_count
 from queue import Empty as EmptyQueue
+from time import process_time
 
 # Installed packages:
 import numpy as np
@@ -21,14 +22,25 @@ import mystic.solvers as my
 from scipy.optimize import minimize
 from sklearn.cluster import KMeans
 
+# pyvvo imports
+from db import db
+
+# Make numpy error on invalid
+np.seterr(invalid = 'raise')
+
 # Constant for ZIP coefficients. ORDER MATTERS!
 ZIPTerms = ['impedance', 'current', 'power']
 
 # List of available solvers for zipFit
 SOLVERS = ['fmin_powell', 'SLSQP']
 
-# Constants for convergence tolerance
-FTOL = 1e-8
+# Constants for convergence tolerance. My understanding from the scipy docs is
+# that once we stop getting FTOL improvement between iterations, we're done. 
+FTOL = 5e-5
+
+# Maximum allowed iterations for SLSQP solver.
+MAXITER = 1000
+
 # GTOL = 5 # Number of iterations without change for fmin_powell
 
 # Define default initial guess for ZIP models.
@@ -98,8 +110,11 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
                              disp=False, ftol=FTOL, full_output=True)
         '''
         # Extract the polynomial coefficients
-        p = sol[0][0:3]
-        q = sol[0][3:6]
+        p = np.array(sol[0][0:3])
+        q = np.array(sol[0][3:6])
+        
+        # Track the polynomial solution for assignment later.
+        poly = sol[0]
         
         # Get the value of the objective function (so the squared error)
         err = sol[1]
@@ -114,11 +129,15 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
     elif solver == 'SLSQP':
         sol = minimize(ZIPObjective, par0, args=(Vbar, Pbar, Qbar), method='SLSQP',
                        constraints={'type':'eq', 'fun': ZIPConstraint},
-                       bounds=BOUNDS, options={'ftol': FTOL})
+                       bounds=BOUNDS, options={'ftol': FTOL,
+                                               'maxiter': MAXITER})
         
         # Extract the polynomial coefficients
-        p = sol.x[0:3]
-        q = sol.x[3:6]
+        p = np.array(sol.x[0:3])
+        q = np.array(sol.x[3:6])
+        
+        # Track the polynomial solution for assignment later.
+        poly = sol.x
         
         # Get the value of the objective function (so the squared error)
         err = sol.fun
@@ -137,7 +156,7 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
     # Collect other useful information
     coeff['base_power'] = Sn
     coeff['error'] = err
-    coeff['poly'] = (*p, *q)
+    coeff['poly'] = poly
     
     return coeff
 
@@ -147,6 +166,11 @@ def estimateNominalPower(P, Q):
     For now, we'll simply use the median of the apparent power.
     """
     Sn = np.median(np.sqrt(np.multiply(P,P) + np.multiply(Q,Q)))
+    
+    # TODO: Should we grab the voltage associated with this Sn to use as the 
+    # nominal voltage? The ZIP load model is designed such that at nominal 
+    # voltage we get nominal power, and not using the voltage associated with
+    # the nominal power breaks away from that.
     
     # If the median P value is negative, flip Sn.
     #if np.median(P) < 0:
@@ -158,10 +182,26 @@ def ZIPObjective(Params, Vbar, Pbar, Qbar):
     """Objective function for minimization.
     
     Minimize squared error of the ZIP polynomial.
+    
+    INPUTS:
+    Params: tuple: a1, a2, a3, b1, b2, b3
+    Vbar: numpy array of voltage divided by nominal voltage
+    Pbar: numpy array of real power divided by nominal apparent power
+    Qbar: numpy array of reactive power divided by nominal apparent power
+    
+    OUTPUT:
+    sum((Pbar - (a1*Vbar^2 + a2*Vbar +a3))^2 
+        + (Qbar - (b1*Vbar^2 + b2*Vbar + b3)))/length(Vbar)
     """
-    a1, a2, a3, b1, b2, b3 = Params
-    return sum( (Pbar - (a1*(Vbar*Vbar)+a2*Vbar+a3))**2
-               + (Qbar - (b1*(Vbar*Vbar)+b2*Vbar+b3))**2 )/len(Vbar)
+    # Pre-compute Vbar^2
+    Vs = np.square(Vbar)
+    
+    # Compute sum of squared error.
+    e = np.sum(np.square(Pbar - (Params[0]*Vs + Params[1]*Vbar + Params[2])) \
+               + np.square(Qbar - (Params[3]*Vs + Params[4]*Vbar + Params[5])))
+    
+    # Return squared error normalized by length of elements.
+    return e / Vbar.shape[0]
     
 def ZIPConstraint(Params):
     """Constraint for ZIP modeling. Ensure "fractions" add up to one.
@@ -171,15 +211,15 @@ def ZIPConstraint(Params):
     a3, b3 = P%cos(thetaP), P%sin(thetaP)
     """
     # Extract parameters from tuple.
-    a1, a2, a3, b1, b2, b3 = Params
+    # a1, a2, a3, b1, b2, b3 = Params
     
-    # Derive power factors/fractions from the polynomial coefficients.
-    coeff = polyToGLD((a1, a2, a3), (b1, b2, b3))
+    # Derive fractions (and power factors, but not using those) from the
+    # polynomial coefficients.
+    f, _ = getFracAndPF(np.array(Params[0:3]), np.array(Params[3:]))
     
     # Return the sum of the fractions, minus 1 (optimization solvers call this
     # function as a constraint, and consider it "satisfied" if it returns 0).
-    return coeff['impedance_fraction'] + coeff['current_fraction'] + \
-        coeff['power_fraction'] - 1
+    return np.sum(f) - 1
         
     """
     NOTE: code below is what we were originally doing. After switching to the 
@@ -194,6 +234,17 @@ def ZIPConstraint(Params):
 
 def polyToGLD(p, q):
     """Takes polynomial ZIP coefficients and converts them to GridLAB-D format.
+    
+    INPUTS:
+        p: numpy array holding a1, a2, a3 (in order)
+        q: numpy array holding b1, b2, b3 (in order)
+        
+    OUTPUTS:
+        dictionary with the following fields:
+        impedance_fraction, current_fraction, power_fraction: fraction/pct for
+            ZIP coefficients.
+        impedance_pf, current_pf, power_pf: signed power factor (cos(theta)) 
+            for ZIP coefficients.
     
     GridLAB-D takes in ZIP fractions and 'power factors' (cosine of the angle).
     Additionally, a negative power factor is used for leading, and a positive
@@ -210,46 +261,68 @@ def polyToGLD(p, q):
         a2 = I%cos(thetaI), b2 = I%sin(thetaI)
         a3 = P%cos(thetaP), b4 = P%sin(thetaP)
     """
+    # Get fractions and power factors
+    f, pf = getFracAndPF(p, q)
+    
     # Initialize return
     out = {}
     
-    # Track index. Note we're 
-    i = 0
-    for k in ZIPTerms:
-        # Initialize the fraction. Note that this reduces correctly, but loses
-        # sign information:
-        # a1 = Z%*cos(thetaZ), b1 = Z%*sin(thetaZ) and so on.
-        fraction = math.sqrt(p[i]*p[i]+q[i]*q[i])
-        
-        # Derive the power-factor:
-        try:
-            pf = abs(p[i]/fraction)
-        except ZeroDivisionError:
-            # If we divided by zero, simply make the power factor 1
-            pf = 1
-            
-        # match what is done in Gridlab-D.
-        # TODO: update so we aren't flipping the fraction here? We should
-        # probably instead use a negative Sn if the "load" is exporting power.
-        if p[i] > 0 and q[i] < 0:
-            # Leading power factor
-            pf *= -1
-        elif p[i] < 0 and q[i] < 0:
-            # Negative load, flip the fraction
-            fraction *= -1
-        elif p[i] < 0 and q[i] > 0:
-            # Negative load and leading power factor, flip both.
-            pf *= -1
-            fraction *= -1
+    # Get fractions and power factors into GridLAB-D named parameters. NOTE:
+    # this depends on the array elements from getFracAndPF being in the correct
+    # order: impedance, current, power. This order needs to match up with the
+    # order of ZIPTerms.
+    for i, k in enumerate(ZIPTerms):
         
         # Assign to return.
-        out[k + '_fraction'] = fraction
-        out[k + '_pf'] = pf
-        
-        # Increment index counter
-        i += 1
+        out[k + '_fraction'] = f[i]
+        out[k + '_pf'] = pf[i]
     
+    # Done. Return.
     return out
+
+def getFracAndPF(p, q):
+    """Helper to get ZIP fractions and powerfactors from polynomial terms.
+    
+    INPUTS:
+    p: numpy array holding a1, a2, a3 (in order)
+    q: numpy array holding b1, b2, b3 (in order)
+    
+    OUTPUTS:
+    f: numpy array holding Z, I, and P fractions
+    pf: numpy array holding impedance power factor, current "", power ""
+    """
+    
+    # Initialize the fractions. Note that this reduces correctly, but loses
+    # sign information:
+    #
+    # a1 = Z%*cos(thetaZ), b1 = Z%*sin(thetaZ) and so on.
+    f = np.sqrt(np.square(p) + np.square(q))
+    
+    # Initialize power factors. Using divide's 'out' and 'where' arguments, we 
+    # ensure that division by zero results in a 1 for the power factor.
+    pf = np.absolute(np.divide(p, f, out=np.ones_like(p), where=(f!=0)))
+    
+    # Get boolean arrays for where p and q are positive
+    posP = p > 0
+    posQ = q > 0
+    
+    # To meet GridLAB-D conventions, we need to make the power factor negative
+    # if it's leading. We also need to flip the fraction if p is negative.
+    
+    # p > 0 and q < 0: leading power factor, flip the pf
+    b = posP & (~posQ)
+    pf[b] = pf[b] * -1
+    
+    # p < 0 and q < 0: negative load, flip fraction
+    b = (~posP) & (~posQ)
+    f[b] = f[b] * -1
+    
+    # p < 0 and q > 0: negative load and leading power factor, flip both
+    b = (~posP) & posQ
+    f[b] = f[b] * -1
+    pf[b] = pf[b] * -1
+    
+    return f, pf
     
 def gldZIP(V, coeff, Vn):
     """Computes P and Q from ZIP coefficients and voltage as GridLAB-D does.
@@ -276,12 +349,14 @@ def gldZIP(V, coeff, Vn):
         coeff['power_fraction'] = 1 - coeff['current_fraction'] - coeff['impedance_fraction']
     '''
     
-    # Loop over the ZIP coefficients and compute each 
+    # Loop over the ZIP coefficients and compute real and imaginary components
+    # for the characteristic (impedance, current, power). 
     d = {}
     for k in ZIPTerms:
         real = coeff['base_power']*coeff[k+'_fraction']*abs(coeff[k+'_pf'])
         imag = real * math.sqrt(1/coeff[k+'_pf']**2 - 1)
         
+        # Flip the imaginary sign if the power factor is less than 0 (leading).
         if coeff[k +'_pf'] < 0:
             imag *= -1
             
@@ -328,9 +403,8 @@ def featureScale(x, xRef=None):
         NaNSeries = xPrime.isnull()
     
     # Loop and zero out.    
-    for index, value in NaNSeries.iteritems():
-        if value:
-            xPrime[index] = 0
+    for index in NaNSeries.index[NaNSeries]:
+        xPrime[index] = 0
     
     return xPrime
 
@@ -640,9 +714,6 @@ def fitForNodeWorker(dbInputs, inQ, outQ, randomSeed=None):
         function adds a 'processTime' field which tracks how long it took to
         call fitForNode.
     """
-    from db import db
-    from time import process_time
-    
     # Get database object.
     dbObj = db(**dbInputs)
     
@@ -677,9 +748,9 @@ def fitForNodeWorker(dbInputs, inQ, outQ, randomSeed=None):
         # Continue to next loop iteration.
         
 def computeRMSD(actual, predicted):
-    """Root-mean-square deviation.
+    """Root-mean-square deviation for two numpy arrays. These should be nx1.
     """
-    out = math.sqrt(np.sum((actual - predicted)**2)/len(actual))
+    out = math.sqrt(np.sum(np.square(actual - predicted))/actual.shape[0])
     return out
 
 def getTimeFilter(clockObj, datetimeIndex, interval, numInterval=2,
@@ -723,9 +794,8 @@ def getTimeFilter(clockObj, datetimeIndex, interval, numInterval=2,
 
 if __name__ == '__main__':
     # Connect to the database.
-    import db
     dbInputs = {'password': '', 'pool_size': 1}
-    dbObj = db.db(**dbInputs)
+    dbObj = db(**dbInputs)
     # We'll use the 'helper' for times
     from helper import clock
     # Times for performing fitting.
