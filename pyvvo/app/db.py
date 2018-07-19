@@ -1216,8 +1216,38 @@ class db:
         return idStr
 
 if __name__ == '__main__':
+    q = "SELECT t as T, temperature, solar_flux FROM r2_12_47_2_ami_climate_1_min WHERE (t>='2016-05-18 11:45:00' AND t<='2016-06-01 11:45:00') ORDER BY t"
+    dbInputs = {'password': '', 'pool_size': 1}
+    dbObj = db(**dbInputs)
+    
+    for _ in range(5):
+        # Get connection and cursor.
+        cnxn, cursor = dbObj.getCnxnAndCursor()
+        
+        t0 = time.time()
+        for _ in range(10):
+            out = pd.read_sql_query(sql=q, con=cnxn, index_col='T')
+        t1 = time.time()
+        print('It took {} seconds to run 10 read_sql_query'.format(t1-t0))
+        
+        dbObj.closeCnxnAndCursor(cnxn, cursor)
+        
+        # Get connection and cursor.
+        cnxn, cursor = dbObj.getCnxnAndCursor()
+        t0 = time.time()
+        for _ in range(10):
+            cursor.execute(q)
+            df = pd.DataFrame(cursor.fetchall(), columns=cursor.column_names)
+            df.set_index(keys='T', inplace=True)
+        t1 = time.time()
+        print('It took {} seconds to run 10 fetchalls into dataframes.'.format(t1-t0))
+        
+        dbObj.closeCnxnAndCursor(cnxn, cursor)
+        
+    '''
     dbObj = db(pool_size=10, database='zip')
     dbObj.truncateTableBySuffix(suffix='_2')
+    '''
     '''
     cnxn1, crsr1 = dbObj.getCnxnAndCursor()
     try:

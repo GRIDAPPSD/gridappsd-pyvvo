@@ -21,6 +21,7 @@ import pandas as pd
 import mystic.solvers as my
 from scipy.optimize import minimize
 from sklearn.cluster import KMeans
+from sklearn.externals.joblib.parallel import parallel_backend
 
 # pyvvo imports
 from db import db
@@ -42,6 +43,9 @@ FTOL = 5e-5
 MAXITER = 1000
 
 # GTOL = 5 # Number of iterations without change for fmin_powell
+
+# We'll be running KMeans in a multithreaded manner. Define number of threads.
+KMTHREADS = 8
 
 # Define default initial guess for ZIP models.
 # We'll take the Oscillating Fan from the CVR report: 
@@ -456,10 +460,11 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
         # TODO: Set this up to run in a multi-threaded manner.
         # https://stackoverflow.com/questions/38601026/easy-way-to-use-parallel-options-of-scikit-learn-functions-on-hpc
         # https://github.com/scikit-learn/scikit-learn/blob/ed5e127b2460b94dbf3398d97990cb54f188d360/sklearn/externals/joblib/parallel.py
-        KM = KMeans(n_clusters=k, random_state=randomState)
+        with parallel_backend('threading'):
+            KM = KMeans(n_clusters=k, random_state=randomState, n_jobs=KMTHREADS)
     
-        # Perform the clustering.
-        KM.fit(dNorm)
+            # Perform the clustering.
+            KM.fit(dNorm)
         
         # Grab cluster centers.
         centers = KM.cluster_centers_
