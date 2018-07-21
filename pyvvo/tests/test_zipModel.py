@@ -26,7 +26,7 @@ RTOL=0.01
 testData = []
 
 # Create constant impedance, constant current, constant power, and mixed test
-# cases.
+# cases. NOTE: At present, none of these tests cover net power export.
 #******************************************************************************
 # CONSTANT IMPEDANCE TEST 1
 Z = 1+1j
@@ -38,8 +38,8 @@ Z = 0.2-15j
 I = V / Z
 S = V * np.conjugate(I)
 testData.append((np.real(S), np.imag(S), 'Constant Impedance Test 2'))
-# CONSTANT IMPEDANCE TEST 3 (exporting power)
-Z = -1200+70j
+# CONSTANT IMPEDANCE TEST 3
+Z = 1200+70j
 I = V / Z
 S = V * np.conjugate(I)
 testData.append((np.real(S), np.imag(S), 'Constant Impedance Test 3'))
@@ -52,19 +52,19 @@ testData.append((np.real(S), np.imag(S), 'Constant Current Test 1'))
 I = 75-4j
 S = V*np.conjugate(I)
 testData.append((np.real(S), np.imag(S), 'Constant Current Test 2'))
-# CONSTANT CURRENT TEST 3 (exporting power)
-I = -213.542+12.15j
+# CONSTANT CURRENT TEST 3
+I = 213.542+12.15j
 S = V*np.conjugate(I)
 testData.append((np.real(S), np.imag(S), 'Constant Current Test 3'))
 #******************************************************************************
 # CONSTANT POWER TEST 1
-S = 1+1j
+S = np.ones_like(V) * 1+1j
 testData.append((np.real(S), np.imag(S), 'Constant Power Test 1'))
 # CONSTANT POWER TEST 2
-S = 15000.12-230.25j
+S = np.ones_like(V) * 15000.12-230.25j
 testData.append((np.real(S), np.imag(S), 'Constant Power Test 2'))
-# CONSTANT POWER TEST 3 (exporting power)
-S = -234+42j
+# CONSTANT POWER TEST 3
+S = np.ones_like(V) * 234+42j
 testData.append((np.real(S), np.imag(S), 'Constant Power Test 3'))
 #******************************************************************************
 # MIXED TEST 1
@@ -99,7 +99,7 @@ Z = 0.06-30j
 I_z = V /Z
 S_z = V * np.conjugate(I_z)
 # Constant current:
-I = -120-15j
+I = 120-15j
 S_i = V * np.conjugate(I)
 # Constant power.
 S_p = np.ones_like(V) * 15+3j
@@ -130,6 +130,14 @@ class Test(unittest.TestCase):
                     resultQ = np.allclose(t[1], Q, rtol=RTOL)
                     result = resultP and resultQ
                     
+                    # Get root mean square deviation.
+                    rmsdP = zipModel.computeRMSD(actual=t[0], predicted=P)
+                    rmsdQ = zipModel.computeRMSD(actual=t[1], predicted=Q)
+                    
+                    # RMSD string
+                    rmsd = ' RMSD P: {0:.2f}, RMSD Q: {0:.2f}'.format(rmsdP,
+                                                                      rmsdQ)
+                    
                     # Craft a message.
                     if not (resultP or resultQ):
                         # Both failed.
@@ -143,7 +151,10 @@ class Test(unittest.TestCase):
                     else:
                         # Success.
                         msg = 'Success for {} with the {} solver.'
-                        print(msg.format(t[2], s))
+                        print(msg.format(t[2], s), rmsd)
+                    
+                    # Add rmsd measurements.
+                    msg += rmsd
                     
                     # Execute the test assertion.
                     self.assertTrue(result, msg.format(t[2], s))
