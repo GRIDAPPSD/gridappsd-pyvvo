@@ -11,9 +11,10 @@ Augmented Lagrangian Adaptive Barrier Minimization
 '''
 # Standard library:
 import math
-from multiprocessing import Process, Queue, JoinableQueue, cpu_count
-from queue import Empty as EmptyQueue
+import multiprocessing as mp
+from queue import Empty, Queue
 from time import process_time
+import threading
 
 # Installed packages:
 import numpy as np
@@ -27,7 +28,7 @@ from sklearn.externals.joblib.parallel import parallel_backend
 from db import db
 
 # Make numpy error on invalid
-np.seterr(invalid = 'raise')
+np.seterr(invalid='raise')
 
 # Constant for ZIP coefficients. ORDER MATTERS!
 ZIPTerms = ['impedance', 'current', 'power']
@@ -59,7 +60,7 @@ PAR0 = np.array([
     0.7332 * math.sin(math.acos(0.97)),
     0.2534 * math.sin(math.acos(0.95)),
     0.0135 * math.sin(math.acos(-1))
-    ])
+])
 # Dave was initially using this:
 # PAR0 = np.ones(6)*(1/18)
 
@@ -76,6 +77,7 @@ PAR0 = np.array([
 # to 1.5
 BOUNDS = [(-1.5, 1.5) for x in range(6)]
 
+
 def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
     """Solve for ZIP coefficients usable by GridLAB-D.
     
@@ -90,12 +92,12 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
     """
     # Estimate nominal power
     Sn = estimateNominalPower(P=P, Q=Q)
-    
+
     # Massage into standard polynomial format
-    Vbar = V/Vn
-    Pbar = P/Sn
-    Qbar = Q/Sn
-    
+    Vbar = V / Vn
+    Pbar = P / Sn
+    Qbar = Q / Sn
+
     # Solve.
     if solver == 'fmin_powell':
         '''
@@ -105,7 +107,7 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
         '''
         sol = my.fmin_powell(ZIPObjective, args=(Vbar, Pbar, Qbar), x0=par0,
                              bounds=BOUNDS,
-                             contraints={'type':'eq', 'fun': ZIPConstraint},
+                             contraints={'type': 'eq', 'fun': ZIPConstraint},
                              disp=False, ftol=FTOL, full_output=True)
         '''
         # Penalty doesn't seem to work well (vs constraint).
@@ -116,71 +118,75 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
         # Extract the polynomial coefficients
         p = np.array(sol[0][0:3])
         q = np.array(sol[0][3:6])
-        
+
         # Track the polynomial solution for assignment later.
         poly = sol[0]
-        
+
         # Get the value of the objective function (so the squared error)
         err = sol[1]
-        
+
         # Check warnings.
         # TODO: handle failurs.
         if sol[4] == 1:
             print('fmin_powell failed: maximum number of function iterations.')
         elif sol[4] == 2:
             print('fmin_powell failed: maximum number of iterations.')
-            
+
     elif solver == 'SLSQP':
-        sol = minimize(ZIPObjective, par0, args=(Vbar, Pbar, Qbar), method='SLSQP',
-                       constraints={'type':'eq', 'fun': ZIPConstraint},
+        sol = minimize(ZIPObjective, par0, args=(Vbar, Pbar, Qbar),
+                       method='SLSQP',
+                       constraints={'type': 'eq', 'fun': ZIPConstraint},
                        bounds=BOUNDS, options={'ftol': FTOL,
                                                'maxiter': MAXITER})
-        
+
         # Extract the polynomial coefficients
         p = np.array(sol.x[0:3])
         q = np.array(sol.x[3:6])
-        
+
         # Track the polynomial solution for assignment later.
         poly = sol.x
-        
+
         # Get the value of the objective function (so the squared error)
         err = sol.fun
-        
+
         if not sol.success:
             # Failed to solve. For now, just print.
             # TODO: handle failures.
             print('SLSQP failed: {}'.format(sol.message))
     else:
-        raise UserWarning('Given solver, {}, is not implemented.'.format(solver))
-        
+        raise UserWarning(
+            'Given solver, {}, is not implemented.'.format(solver))
+
     # Convert the polynomial coefficients to GridLAB-D format (fractions and
     # power factors)
     coeff = polyToGLD(p, q)
-    
+
     # Collect other useful information
     coeff['base_power'] = Sn
     coeff['error'] = err
     coeff['poly'] = poly
-    
+
     return coeff
+
 
 def estimateNominalPower(P, Q):
     """Given a set of apparent power measurements, estimate nominal power.
     
     For now, we'll simply use the median of the apparent power.
     """
-    Sn = np.median(np.sqrt(np.multiply(P,P) + np.multiply(Q,Q)))
-    
+    Sn = np.median(np.sqrt(np.multiply(P, P) + np.multiply(Q, Q)))
+
     # TODO: Should we grab the voltage associated with this Sn to use as the 
     # nominal voltage? The ZIP load model is designed such that at nominal 
     # voltage we get nominal power, and not using the voltage associated with
     # the nominal power breaks away from that.
-    
+
     # If the median P value is negative, flip Sn.
-    #if np.median(P) < 0:
+    # if np.median(P) < 0:
     #    Sn *= -1
-    
+
     return Sn
+
 
 def ZIPObjective(Params, Vbar, Pbar, Qbar):
     """Objective function for minimization.
@@ -199,14 +205,16 @@ def ZIPObjective(Params, Vbar, Pbar, Qbar):
     """
     # Pre-compute Vbar^2
     Vs = np.square(Vbar)
-    
+
     # Compute sum of squared error.
-    e = np.sum(np.square(Pbar - (Params[0]*Vs + Params[1]*Vbar + Params[2])) \
-               + np.square(Qbar - (Params[3]*Vs + Params[4]*Vbar + Params[5])))
-    
+    e = np.sum(
+        np.square(Pbar - (Params[0] * Vs + Params[1] * Vbar + Params[2])) \
+        + np.square(Qbar - (Params[3] * Vs + Params[4] * Vbar + Params[5])))
+
     # Return squared error normalized by length of elements.
     return e / Vbar.shape[0]
-    
+
+
 def ZIPConstraint(Params):
     """Constraint for ZIP modeling. Ensure "fractions" add up to one.
     
@@ -216,15 +224,15 @@ def ZIPConstraint(Params):
     """
     # Extract parameters from tuple.
     # a1, a2, a3, b1, b2, b3 = Params
-    
+
     # Derive fractions (and power factors, but not using those) from the
     # polynomial coefficients.
     f, _ = getFracAndPF(np.array(Params[0:3]), np.array(Params[3:]))
-    
+
     # Return the sum of the fractions, minus 1 (optimization solvers call this
     # function as a constraint, and consider it "satisfied" if it returns 0).
     return np.sum(f) - 1
-        
+
     """
     NOTE: code below is what we were originally doing. After switching to the 
     code above (call polyToGLD, get fractions, sum), we saw the optimization 
@@ -234,7 +242,7 @@ def ZIPConstraint(Params):
     return math.sqrt(a1*a1 + b1*b1) + math.sqrt(a2*a2 + b2*b2) + \
         math.sqrt(a3*a3 + b3*b3) - 1.0
     """
-    
+
 
 def polyToGLD(p, q):
     """Takes polynomial ZIP coefficients and converts them to GridLAB-D format.
@@ -267,22 +275,22 @@ def polyToGLD(p, q):
     """
     # Get fractions and power factors
     f, pf = getFracAndPF(p, q)
-    
+
     # Initialize return
     out = {}
-    
+
     # Get fractions and power factors into GridLAB-D named parameters. NOTE:
     # this depends on the array elements from getFracAndPF being in the correct
     # order: impedance, current, power. This order needs to match up with the
     # order of ZIPTerms.
     for i, k in enumerate(ZIPTerms):
-        
         # Assign to return.
         out[k + '_fraction'] = f[i]
         out[k + '_pf'] = pf[i]
-    
+
     # Done. Return.
     return out
+
 
 def getFracAndPF(p, q):
     """Helper to get ZIP fractions and powerfactors from polynomial terms.
@@ -295,39 +303,40 @@ def getFracAndPF(p, q):
     f: numpy array holding Z, I, and P fractions
     pf: numpy array holding impedance power factor, current "", power ""
     """
-    
+
     # Initialize the fractions. Note that this reduces correctly, but loses
     # sign information:
     #
     # a1 = Z%*cos(thetaZ), b1 = Z%*sin(thetaZ) and so on.
     f = np.sqrt(np.square(p) + np.square(q))
-    
+
     # Initialize power factors. Using divide's 'out' and 'where' arguments, we 
     # ensure that division by zero results in a 1 for the power factor.
-    pf = np.absolute(np.divide(p, f, out=np.ones_like(p), where=(f!=0)))
-    
+    pf = np.absolute(np.divide(p, f, out=np.ones_like(p), where=(f != 0)))
+
     # Get boolean arrays for where p and q are positive
     posP = p > 0
     posQ = q > 0
-    
+
     # To meet GridLAB-D conventions, we need to make the power factor negative
     # if it's leading. We also need to flip the fraction if p is negative.
-    
+
     # p > 0 and q < 0: leading power factor, flip the pf
     b = posP & (~posQ)
     pf[b] = pf[b] * -1
-    
+
     # p < 0 and q < 0: negative load, flip fraction
     b = (~posP) & (~posQ)
     f[b] = f[b] * -1
-    
+
     # p < 0 and q > 0: negative load and leading power factor, flip both
     b = (~posP) & posQ
     f[b] = f[b] * -1
     pf[b] = pf[b] * -1
-    
+
     return f, pf
-    
+
+
 def gldZIP(V, coeff, Vn):
     """Computes P and Q from ZIP coefficients and voltage as GridLAB-D does.
     
@@ -337,7 +346,7 @@ def gldZIP(V, coeff, Vn):
     Check out the 'triplex_load_update_fxn()' in:
     https://github.com/gridlab-d/gridlab-d/blob/master/powerflow/triplex_load.cpp
     """
-    
+
     '''
     # GridLAB-D forces the coefficients to sum to 1 if they don't exactly. This screws things up. 
     # TODO: The application should run a custom GLD build which doesn't do this.
@@ -352,32 +361,34 @@ def gldZIP(V, coeff, Vn):
             print('debug.')
         coeff['power_fraction'] = 1 - coeff['current_fraction'] - coeff['impedance_fraction']
     '''
-    
+
     # Loop over the ZIP coefficients and compute real and imaginary components
     # for the characteristic (impedance, current, power). 
     d = {}
     for k in ZIPTerms:
-        real = coeff['base_power']*coeff[k+'_fraction']*abs(coeff[k+'_pf'])
-        imag = real * math.sqrt(1/coeff[k+'_pf']**2 - 1)
-        
+        real = coeff['base_power'] * coeff[k + '_fraction'] * abs(
+            coeff[k + '_pf'])
+        imag = real * math.sqrt(1 / coeff[k + '_pf'] ** 2 - 1)
+
         # Flip the imaginary sign if the power factor is less than 0 (leading).
-        if coeff[k +'_pf'] < 0:
+        if coeff[k + '_pf'] < 0:
             imag *= -1
-            
+
         d[k] = (real, imag)
-    
+
     # Compute P and Q
-    P_z = (V**2/Vn**2) * d['impedance'][0]
-    P_i = (V/Vn) * d['current'][0]
+    P_z = (V ** 2 / Vn ** 2) * d['impedance'][0]
+    P_i = (V / Vn) * d['current'][0]
     P_p = d['power'][0]
     P = P_z + P_i + P_p
-    
-    Q_z = (V**2/Vn**2) * d['impedance'][1]
-    Q_i = (V/Vn) * d['current'][1]
+
+    Q_z = (V ** 2 / Vn ** 2) * d['impedance'][1]
+    Q_i = (V / Vn) * d['current'][1]
     Q_p = d['power'][1]
     Q = Q_z + Q_i + Q_p
-    
+
     return P, Q
+
 
 def featureScale(x, xRef=None):
     """Helper function to perform feature scaling.
@@ -395,9 +406,9 @@ def featureScale(x, xRef=None):
     """
     if xRef is None:
         xRef = x
-    
+
     xPrime = (x - xRef.min()) / (xRef.max() - xRef.min())
-    
+
     # If an entire column is NaN, zero it out.
     if len(xPrime.shape) > 1:
         # Pandas Dataframe
@@ -405,12 +416,13 @@ def featureScale(x, xRef=None):
     elif len(xPrime.shape) == 1:
         # Pandas Series
         NaNSeries = xPrime.isnull()
-    
+
     # Loop and zero out.    
     for index in NaNSeries.index[NaNSeries]:
         xPrime[index] = 0
-    
+
     return xPrime
+
 
 def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
                        solver='SLSQP', randomState=None, poly=None):
@@ -428,7 +440,7 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
     """
     # Compute maximum possible clusters:
     n = np.floor(data.shape[0] / minClusterSize).astype(int)
-    
+
     # Match up columns in data and presentConditions for in determining which
     # cluster to use.
     useCol = []
@@ -440,64 +452,65 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
             excludeColInd.append(colInd)
         else:
             useCol.append(colName)
-            
+
     # Ensure presentConditions is in the same order as 'data'
     presentConditions = presentConditions[useCol]
-    
+
     # Normalize 'data'
     dNorm = featureScale(x=data)
-    
+
     # Normalize presentConditions for finding the right cluster.
     pc = featureScale(x=presentConditions, xRef=data.loc[:, useCol])
-    
+
     # Initialize variables for tracking our best fit.
     bestCoeff = None
     minRMSD = np.inf
-    
+
     # Loop over cluster counts from highest to lowest.
     for k in range(n, 0, -1):
-        # Initalize K Means cluster object.
-        # TODO: Set this up to run in a multi-threaded manner.
+        # Initalize K Means cluster object, perform clustering in multithreaded
+        # manner.
         # https://stackoverflow.com/questions/38601026/easy-way-to-use-parallel-options-of-scikit-learn-functions-on-hpc
         # https://github.com/scikit-learn/scikit-learn/blob/ed5e127b2460b94dbf3398d97990cb54f188d360/sklearn/externals/joblib/parallel.py
         with parallel_backend('threading'):
-            KM = KMeans(n_clusters=k, random_state=randomState, n_jobs=KMTHREADS)
-    
+            KM = KMeans(n_clusters=k, random_state=randomState,
+                        n_jobs=KMTHREADS)
+
             # Perform the clustering.
             KM.fit(dNorm)
-        
+
         # Grab cluster centers.
         centers = KM.cluster_centers_
-        
+
         # Remove the P and Q information.
         centers = np.delete(centers, excludeColInd, axis=1)
-        
+
         # Use squared Euclidean distance to pick a center.
         minDistance = np.inf
         bestLabel = None
-        
+
         for rowInd in range(centers.shape[0]):
-            sqDist = ((pc - centers[rowInd])**2).sum()
-            
+            sqDist = ((pc - centers[rowInd]) ** 2).sum()
+
             # Update min as necessary
             if sqDist < minDistance:
                 minDistance = sqDist.sum()
                 bestLabel = rowInd
-            
+
         # If this cluster doesn't have enough data in it, move along.
         u, c = np.unique(KM.labels_, return_counts=True)
         if c[u == bestLabel] < minClusterSize:
             continue
-        
+
         # Extract data to perform fit.
         fitData = data.loc[KM.labels_ == bestLabel, ['P', 'Q', 'V']]
-        
-        fitOutputs = fitAndEvaluate(fitData=fitData, Vn=Vn, solver=solver, 
+
+        fitOutputs = fitAndEvaluate(fitData=fitData, Vn=Vn, solver=solver,
                                     poly=poly)
-        
+
         # Should we consider the sum of these errors? Only look at P? 
         rmsd = fitOutputs['rmsdP'] + fitOutputs['rmsdQ']
-        
+
         # Track if this is the best so far.
         if rmsd < minRMSD:
             minRMSD = rmsd
@@ -507,8 +520,9 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
             # Qout = Qest.copy(deep=True)
             # bestCoeff = copy.deepcopy(coeff)
             bestCoeff = fitOutputs['coeff']
-            
+
     return bestCoeff, minRMSDP, minRMSDQ
+
 
 def fitAndEvaluate(fitData, Vn, solver, poly=None):
     """Helper to perform and evaluate ZIP fit.
@@ -522,22 +536,23 @@ def fitAndEvaluate(fitData, Vn, solver, poly=None):
     """
     if poly is None:
         poly = PAR0
-    
+
     # Perform ZIP fit.
     coeff = zipFit(V=fitData['V'], P=fitData['P'],
-                    Q=fitData['Q'], Vn=Vn, solver=solver, par0=poly)
-        
+                   Q=fitData['Q'], Vn=Vn, solver=solver, par0=poly)
+
     # Evaluate the ZIP fit
     Pest, Qest = gldZIP(V=fitData['V'], coeff=coeff, Vn=Vn)
-        
+
     # Compute the root mean square deviation
     rmsdP = computeRMSD(fitData['P'], Pest)
     rmsdQ = computeRMSD(fitData['Q'], Qest)
-    
-    return {'coeff': coeff, 'Pest': Pest, 'Qest': Qest, 'rmsdP': rmsdP, 
+
+    return {'coeff': coeff, 'Pest': Pest, 'Qest': Qest, 'rmsdP': rmsdP,
             'rmsdQ': rmsdQ}
 
-def fitForNode(dbObj, dataIn, randomState=None):
+
+def fitForNode(dataIn, randomState=None):
     """Perform a cluster (optional) and ZIP fit for a given node and times.
     
     INPUTS:
@@ -547,6 +562,8 @@ def fitForNode(dbObj, dataIn, randomState=None):
         REQUIRED FIELDS:
         table: table in database to use.
         node: name of node to pull from database.
+        node_data: pandas DataFrame with data for this node. Data should come
+            from call to db.getTPQVForNode
         starttime: aware datetime indicating inclusive left time bound.
         stoptime: aware datetime indicating inclusive right time bound.
         cluster: boolean flag. If True, data will be clustered and a ZIP
@@ -592,24 +609,19 @@ def fitForNode(dbObj, dataIn, randomState=None):
         P_estimate = Prediction (estimate) of P given V and ZIP coefficients
         Q_estimate = "" of Q ""
     """
-    # Get data from database.
-    d = dbObj.getTPQVForNode(table=dataIn['table'], node=dataIn['node'],
-                             starttime=dataIn['starttime'],
-                             stoptime=dataIn['stoptime'])
-    
     # Ensure our filter matches our data
-    if len(dataIn['timeFilter']) != d.shape[0]:
+    if len(dataIn['timeFilter']) != dataIn['node_data'].shape[0]:
         raise ValueError('Given bad time filter or start/stop times!')
-    
+
     # Filter data by time.
-    d = d.loc[dataIn['timeFilter'], :]
-    
+    d = dataIn['node_data'].loc[dataIn['timeFilter'], :]
+
     # If we're clustering, associate the climateData.
     if dataIn['cluster']:
         # Associate climate data. Note the climate data has already been 
         # filtered.
         d = d.merge(dataIn['climateData'], how='outer', on='T')
-    
+
     # Mode will be 'predict' if we don't actually know what P, Q, and V are
     # for the next time step. Mode will be 'test' if we do know, and want
     # are 'testing' our prediction powers. 
@@ -619,10 +631,10 @@ def fitForNode(dbObj, dataIn, randomState=None):
     if dataIn['mode'] == 'test':
         # Grab the data for which we're trying to predict.
         dActual = d.iloc[-1]
-        
-        # Drop it from the dataframe so we don't include it in our fitting.
+
+        # Drop it from the DataFrame so we don't include it in our fitting.
         d = d.drop(dActual.name)
-        
+
         # Use the actual data for our "present conditions"
         if dataIn['cluster']:
             # We'll have out climate data.
@@ -630,36 +642,36 @@ def fitForNode(dbObj, dataIn, randomState=None):
         else:
             # No climate data
             fields = ['V']
-            
+
         pc = dActual.loc[fields]
-        
+
     elif dataIn['mode'] == 'predict':
         pc = pd.Series()
-        
+
         if dataIn['cluster']:
             # Use forecast values for temperature and solar_flux, if they
             # are given. Otherwise, use last available value.
             for f in ['temperature', 'solar_flux']:
-                try: 
+                try:
                     # Use the forecasted value.
                     pc[f] = dataIn[f + '_forecast']
                 except KeyError:
                     # Not given a forecast, use last available value.
                     pc[f] = d.iloc[-1][f]
-                    
+
         # Use the last measured voltage.
         # TODO: This is the last field measured voltage. We can probably
         # include the last modeled voltage in here.
         pc['V'] = d.iloc[-1]['V']
-        
+
     else:
         # Mode other than 'test' or 'predict'
         raise ValueError("Unexpected mode, {}".format(dataIn['mode']))
-    
+
     # Initialize return.
     outDict = {}
     outDict['node'] = dataIn['node']
-    
+
     # Either cluster and perform fit or just perform fit.
     if dataIn['cluster']:
         # Cluster by P, Q, V, temp, and solar flux, then perform a ZIP fit.
@@ -668,15 +680,15 @@ def fitForNode(dbObj, dataIn, randomState=None):
                                minClusterSize=dataIn['minClusterSize'],
                                Vn=dataIn['Vn'], solver=dataIn['solver'],
                                randomState=randomState, poly=dataIn['poly'])
-        
+
         # Put outputs in the outDict.
         outDict['rmsdP_train'] = rmsdP
         outDict['rmsdQ_train'] = rmsdQ
         outDict['coeff'] = coeff
-    
+
     else:
         # No clustering, just fit.
-        fitOutputs = fitAndEvaluate(fitData=d, Vn=Vn, solver=solver, 
+        fitOutputs = fitAndEvaluate(fitData=d, Vn=Vn, solver=solver,
                                     poly=dataIn['poly'])
         # Put outputs in the outDict.
         outDict['rmsdP_train'] = fitOutputs['rmsdP']
@@ -687,18 +699,18 @@ def fitForNode(dbObj, dataIn, randomState=None):
     if dataIn['mode'] == 'test':
         # Use these coefficients to predict the next time interval.
         Pest, Qest = gldZIP(V=dActual['V'], coeff=coeff, Vn=dataIn['Vn'])
-        
+
         outDict['V'] = dActual['V']
         outDict['P_actual'] = dActual['P']
         outDict['Q_actual'] = dActual['Q']
         outDict['P_estimate'] = Pest
         outDict['Q_estimate'] = Qest
-    
+
     # All done.
     return outDict
 
-    
-def fitForNodeWorker(dbInputs, inQ, outQ, randomSeed=None):
+
+def fitForNodeWorker(inQ, outQ, randomSeed=None):
     """Function designed to perform ZIP fits in a parallel manner (on a
         worker). This should work for either a thread or process. Since this
         is CPU bound, processes make more sense, threads may not provide much
@@ -706,11 +718,11 @@ def fitForNodeWorker(dbInputs, inQ, outQ, randomSeed=None):
     
     INPUTS:
         dbInputs: dictionary of keyword arguments for db.db constructor.
-        inQ: JoinableQueue which will be have data needed to perform the fit
-            inserted into it. Each item will be a dictionary. See comments for
-            the 'dataIn' input to the 'fitForNode' function to see all the 
-            fields.
-        outQ: Queue which will have results put in it.
+        inQ: multiprocessing JoinableQueue which will be have data needed to
+            perform the fit inserted into it. Each item will be a dictionary.
+            See comments for the 'dataIn' input to the 'fitForNode' function to
+            see all the fields.
+        outQ: multiprocessing Queue which will have results put in it.
         randomSeed: integer for seeding random number generator.
         
     OUTPUTS:
@@ -719,44 +731,44 @@ def fitForNodeWorker(dbInputs, inQ, outQ, randomSeed=None):
         function adds a 'processTime' field which tracks how long it took to
         call fitForNode.
     """
-    # Get database object.
-    dbObj = db(**dbInputs)
-    
+
     # Get random state (used for clustering).
-    randomState = np.random.RandomState(seed=randomSeed)
-    
+    random_state = np.random.RandomState(seed=randomSeed)
+
     # Enter loop which continues until signal received to terminate.
     while True:
         # Pull data out of the input queue.
-        dataIn = inQ.get()
-            
+        data_in = inQ.get()
+
         # None will signal termination of the process.
-        if dataIn is None:
+        if data_in is None:
             break
-        
+
         # Time this run.
         t0 = process_time()
-        
+
         # Perform ZIP fitting.
-        outDict = fitForNode(dbObj=dbObj, dataIn=dataIn,
-                             randomState=randomState)
-        
+        out_dict = fitForNode(dataIn=data_in, randomState=random_state)
+
         # Assign timing.    
-        outDict['processTime'] = process_time() - t0
-        
+        out_dict['processTime'] = process_time() - t0
+        out_dict['database_time'] = data_in['database_time']
+
         # Put the dictionary in the output queue.
-        outQ.put(outDict)
-        
+        outQ.put(out_dict)
+
         # Mark this task as done.
         inQ.task_done()
-        
+
         # Continue to next loop iteration.
-        
+
+
 def computeRMSD(actual, predicted):
     """Root-mean-square deviation for two numpy arrays. These should be nx1.
     """
-    out = math.sqrt(np.sum(np.square(actual - predicted))/actual.shape[0])
+    out = math.sqrt(np.sum(np.square(actual - predicted)) / actual.shape[0])
     return out
+
 
 def getTimeFilter(clockObj, datetimeIndex, interval, numInterval=2,
                   clockField='start'):
@@ -771,17 +783,17 @@ def getTimeFilter(clockObj, datetimeIndex, interval, numInterval=2,
     clockField: First input to clockObj.timeDiff. Defaults to 'start'
     """
     # Grab given hour +/- numInterval intervals.
-    lowerTime = clockObj.timeDiff(clockField, -numInterval*interval).time()
-    upperTime = clockObj.timeDiff(clockField, numInterval*interval).time()
+    lowerTime = clockObj.timeDiff(clockField, -numInterval * interval).time()
+    upperTime = clockObj.timeDiff(clockField, numInterval * interval).time()
 
     # Get logical for all days which are of the same type (weekday vs
     # weekend)
     DoWBool = (datetimeIndex.dayofweek >= dayRange[0]) & \
-        (datetimeIndex.dayofweek <= dayRange[1])
+              (datetimeIndex.dayofweek <= dayRange[1])
     # Get logical to ensure we're in the time bounds.
     upperBool = datetimeIndex.time <= upperTime
     lowerBool = datetimeIndex.time >= lowerTime
-    
+
     # Determine how to combine the upper and lower booleans.
     if lowerTime > upperTime:
         # Our times are crossing over the day boundary, need to use 'or.'
@@ -791,46 +803,79 @@ def getTimeFilter(clockObj, datetimeIndex, interval, numInterval=2,
         timeFilter = upperBool & lowerBool
     else:
         raise UserWarning('Unexpected behavior... Times are equal...')
-    
+
     # Construct overall time filter.
     overallFilter = DoWBool & timeFilter
 
     return overallFilter
 
+
+def database_worker(db_obj, thread_queue, process_queue):
+    """Function for threads to get node data from the database.
+    """
+    while True:
+        # Grab data from the thread_queue.
+        data_in = thread_queue.get()
+
+        # None will signal termination of the thread.
+        if data_in is None:
+            break
+
+        # Time database access.
+        t0 = process_time()
+
+        # Get data for this node from the database.
+        data_in['node_data'] = \
+            db_obj.getTPQVForNode(table=data_in['table'], node=data_in['node'],
+                                  starttime=data_in['starttime'],
+                                  stoptime=data_in['stoptime'])
+
+        # Assign timing.
+        data_in['database_time'] = process_time() - t0
+
+        # Put the dictionary in the process_queue.
+        process_queue.put(data_in)
+
+        # Mark this task as complete.
+        thread_queue.task_done()
+
+        # Continue to next loop iteration.
+
+
 if __name__ == '__main__':
-    # Connect to the database.
-    dbInputs = {'password': '', 'pool_size': 1}
-    dbObj = db(**dbInputs)
     # We'll use the 'helper' for times
     from helper import clock
+
     # Times for performing fitting.
-    st = '2016-06-01 12:00:00'
-    et = '2016-06-01 14:00:00'
+    #st = '2016-11-06 00:45:00'
+    #et = '2016-11-06 02:15:00'
+    st = '2016-01-01 00:00:00'
+    et = '2016-01-01 02:00:00'
     # timezone
     tz = 'PST+8PDT'
-    
+
     # Set random seed.
     seed = 42
-    
+
     # Define our data interval (15 minutes).
     intervalMinute = 15
-    intervalSecond = intervalMinute*60
-    
+    intervalSecond = intervalMinute * 60
+
     # Use a two week window for grabbing historic data
-    window = 60*60*24*7*2
-    
-    # Initialize a clock object for "traning" datetimes.
+    window = 60 * 60 * 24 * 7 * 2
+
+    # Initialize a clock object for "training" datetimes.
     clockObj = clock(startStr=st, finalStr=et,
                      interval=intervalSecond,
                      tzStr=tz, window=window)
-    
+
     # nominal voltage
-    Vn=240
-    
+    Vn = 240
+
     # solver to use 
     # solver='fmin_powell'
     solver = 'SLSQP'
-    
+
     # Table data is in
     table = 'r2_12_47_2_ami_triplex_15_min'
     climateTable = 'r2_12_47_2_ami_climate_1_min'
@@ -852,77 +897,79 @@ if __name__ == '__main__':
              'tpm2_R2-12-47-2_tm_137_R2-12-47-2_tn_329',
              'tpm0_R2-12-47-2_tm_168_R2-12-47-2_tn_360'
              ]
-    
+
     # Initialize some data frames for holding results.
     outDf = pd.DataFrame
-        
+
     # Hard-code output names
     outDfName = 'cluster' + '_' + solver
-    
-    # Initialize queues for parallelization.
-    inQ = JoinableQueue()
-    outQ = Queue()
-    
-    # Define how many processers/processes to use
-    PROCESSES = cpu_count()
+
+    # We'll use threads to pull node data to feed the processes.
+    THREADS = 8
+
+    # Define how many processors/processes to use
+    # PROCESSES = mp.cpu_count() - 1
+    PROCESSES = 7
+
+    # Connect to the database.
+    dbInputs = {'password': '', 'pool_size': THREADS+1}
+    db_obj = db(**dbInputs)
+
+    # Initialize queue for threads.
+    thread_queue = Queue()
+
+    # Initialize queues for processes. We'll limit it's size so we don't pull
+    # in too much data and blow up our memory needs. For now, we're working
+    # with only 16 nodes, so we'll hard-code cap it there.
+    process_in_queue = mp.JoinableQueue(maxsize=16)
+    process_out_queue = mp.Queue()
+
+    # Start threads.
+    for _ in range(THREADS):
+        threading.Thread(target=database_worker,
+                         args=(db_obj, thread_queue, process_in_queue)).start()
+
     # PROCESSES = 1
     print('Using {} cores.'.format(str(PROCESSES)))
-    
-    # Start workers.
+
+    # Start process workers.
     for _ in range(PROCESSES):
-        Process(target=fitForNodeWorker,
-                args=(dbInputs, inQ, outQ, seed)).start()
-    
+        mp.Process(target=fitForNodeWorker,
+                   args=(process_in_queue, process_out_queue, seed)).start()
+
     # Flag for writing headers to file.
-    headerFlag=True
-    
+    headerFlag = True
+
     # Initialize dictionary for tracking previous fits to use as a starting
     # condition for the next fit.
     prevPoly = {}
-    
+
     # Loop over time to perform fits and predictions.
     while clockObj.stillTime():
         # Grab times to use for this interval
         windowStart, windowEnd = clockObj.getWindow()
         clockStart, clockStop = clockObj.getStartStop()
-        
-        # Get climate data for the time in question. We need to reach back by
-        # one intervalSecond so that things are correct when we resample.
-        climateStart = clockObj.timeDiff(tStr='windowStart',
-                                         delta=(-1*intervalSecond))
-        '''
-        # Call below grabs only historic climate data, what we actually want
-        # is to include present conditions for testing.
-        climateStop = clockObj.timeDiff(tStr='windowStop',
-                                        delta=(-1*intervalSecond))
-        '''
-        climateStop = clockObj.timeDiff(tStr='start',
-                                        delta=(-1*intervalSecond))
-        
-        climateData = dbObj.getTempAndFlux(table=climateTable,
-                                           starttime=climateStart,
-                                           stoptime=climateStop)
-        
-        # Resample to get mean climate data over each 15 minute intervalSecond. This
-        # should match up with how AMI averages are computed (data before the
-        # stamped time is used to create the average)
-        climateData = climateData.resample((str(intervalMinute) + 'Min'),
-                                           label='right').mean()
-                                           
+
+        # Get the climate data for window up to start time. This will include
+        # present conditions for testing purposes.
+        climateData = db_obj.getTempAndFlux(table=climateTable,
+                                            starttime=windowStart,
+                                            stoptime=clockStart)
+
         # Determine whether we're in a weekday or weekend, grab an inclusive 
         # range to use.
         dayRange = clockObj.dayOfWeekRange()
-        
+
         # Get boolean filters for time.
-        
+
         timeFilter = getTimeFilter(clockObj=clockObj,
                                    datetimeIndex=climateData.index,
                                    interval=intervalSecond,
                                    numInterval=2, clockField='start')
-        
+
         # Filter the climate data.
         climateData = climateData[timeFilter]
-        
+
         # Loop over the nodes.
         for node in nodes:
             # Grab previous polynomial (if it's been set)
@@ -930,26 +977,43 @@ if __name__ == '__main__':
                 poly = prevPoly[node]
             except KeyError:
                 poly = None
-            
+
             # Put dictionary in the queue for processing.
-            inQ.put({'table': table, 'node': node, 'starttime': windowStart,
-                     'stoptime': clockStart, 'cluster': True, 'mode': 'test',
-                     'timeFilter': timeFilter, 'climateData': climateData,
-                     'minClusterSize': 4, 'Vn': Vn, 'solver': solver,
-                     'poly': poly})
-            
-        # Wait for the work to be done.
-        inQ.join()
-        
+            thread_queue.put({'table': table, 'node': node,
+                              'starttime': windowStart, 'stoptime': clockStart,
+                              'cluster': True, 'mode': 'test',
+                              'timeFilter': timeFilter,
+                              'climateData': climateData, 'minClusterSize': 4,
+                              'Vn': Vn, 'solver': solver, 'poly': poly})
+
+        # Wait for database work to be done.
+        thread_queue.join()
+
+        # Spin up another process to help, now that we've freed up a core from
+        # performing database access.
+        '''
+        mp.Process(target=fitForNodeWorker, args=(process_in_queue,
+                                                  process_out_queue,
+                                                  seed)).start()
+        '''
+
+        # Wait for multiprocessing work to finish.
+        process_in_queue.join()
+
+        '''        
+        # Kill a single process (recall we just spun up and extra one).
+        process_in_queue.put(None)
+        '''
+
         # Initialize list for dumping queue data to.
         qList = []
-        
-        # Get data out of the output queue and into the output dataframe.
+
+        # Get data out of the output queue and into the output DataFrame.
         while True:
             try:
                 # Grab data from the queue.
-                thisData = outQ.get_nowait()
-            except EmptyQueue:
+                thisData = process_out_queue.get_nowait()
+            except Empty:
                 # Queue is empty, so we have all the data.
                 break
             else:
@@ -959,36 +1023,38 @@ if __name__ == '__main__':
                 for key, item in thisData['coeff'].items():
                     if key == 'poly':
                         # Track the previous polynomial.
-                        prevPoly[node] = thisData['coeff']['poly']
+                        prevPoly[thisData['node']] = thisData['coeff']['poly']
                     elif key == 'error':
                         # No need to track optimization error.
                         continue
-                    
+
                     # Add the item.
                     thisData[key] = item
-                
+
                 # Remove the 'coeff' item.
-                # TODO: Track previous 'poly' to use as initial conditions for
-                # the next fit.
                 thisData.pop('coeff')
-                
+
                 # Add this dictionary to the list.
                 qList.append(thisData)
-            
-        # Create a dataframe for this timestep, write it to file.
+
+        # Create a DataFrame for this timestep, write it to file.
         pd.DataFrame(qList).to_csv(outDfName + '.csv', mode='a',
                                    header=headerFlag)
-        
+
         # Ensure we only write headers the first time.
         headerFlag = False
-        
+
         print('Done with time {}.'.format(clockStart))
 
         # Advance clock.
         clockObj.advanceTime()
-        
+
     # Send the process the "kill signal."
     for _ in range(PROCESSES):
-        inQ.put(None)
-        
+        process_in_queue.put(None)
+
+    # Send the threads the "kill signal."
+    for _ in range(THREADS):
+        thread_queue.put(None)
+
     print('All done.')
