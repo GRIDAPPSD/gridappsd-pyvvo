@@ -468,7 +468,6 @@ class db:
         
         WARNING: This method uses a "fetchall." If you pass a large timerange
         and the data is granular, memory problems will ensue.
-        
         """
         q = ("SELECT {T} AS T, {P} AS P, {Q} AS Q, {V} AS V "
              + "FROM {table}").format(T=tCol, P=cols['P'], Q=cols['Q'],
@@ -478,7 +477,7 @@ class db:
         q += self.getTimeAndIDFilter(starttime=starttime,
                                      stoptime=stoptime, table=table, 
                                      idCol=idCol, tCol=tCol,
-                                     nameCol=nameCol)
+                                     nameCol=nameCol, nameVal=node)
         
         # Add additional 'WHERE' filtering for the node
         q += " AND {nameCol}='{node}'".format(nameCol=nameCol, node=node)
@@ -495,11 +494,12 @@ class db:
         finally:
             # Clean up.
             self.closeCnxnAndCursor(cnxn, cursor)
-        
+
+        # Done.
         return out
     
     def getTempAndFlux(self, table, cols={'temperature': 'temperature',
-                                          'solar_flux': 'solar_flux',},
+                                          'solar_flux': 'solar_flux'},
                        nameCol='name', idCol='id', tCol='t', starttime=None,
                        stoptime=None):
         """Get temperature and solar flux data from database.
@@ -898,7 +898,7 @@ class db:
         return inDict
     
     def getTimeAndIDFilter(self, starttime, stoptime, table, idCol='id',
-                           tCol='t', nameCol='name'):
+                           tCol='t', nameCol='name', nameVal=None):
         """Helper function to get WHERE clause for time-based query. Both times
             are considered inclusive. If the times are ambiguous (DST 'fall 
             back'), an additional ID filter is added.
@@ -914,7 +914,8 @@ class db:
         if ambiguous:
             idFilter = self.idFilter(tFilter=tFilter, table=table,
                                   starttime=starttime, stoptime=stoptime,
-                                  idCol=idCol, tCol=tCol, nameCol=nameCol)
+                                  idCol=idCol, tCol=tCol, nameCol=nameCol,
+                                  nameVal=nameVal)
         else:
             idFilter = ''
             
@@ -971,7 +972,7 @@ class db:
         return tFilter
     
     def idFilter(self, tFilter, table, starttime, stoptime, idCol,
-                 tCol, nameCol):
+                 tCol, nameCol, nameVal=None):
         """Function to get an ID filter if dates are ambiguous.
         
         WARNING: if we're dealing with a crazy small recording interval, this
@@ -993,14 +994,19 @@ class db:
              + "count(*) > 1").format(tCol=tCol, table=table)
         '''
         try:
+            # We may want to filter by name.
+            if nameVal is not None:
+                nameFilter = " AND {}='{}'".format(nameCol, nameVal)
+            else:
+                nameFilter = ''
+            
             # Form query which returns duplicate time/name pairs for the given
             # time range.
-            q = (("SELECT {}, {}, count(*) ".format(tCol, nameCol)
+            q = ("SELECT {}, {}, count(*) ".format(tCol, nameCol)
                   + "FROM {} ".format(table)
-                  + tFilter + " "
-                  + "GROUP BY {}, {} ".format(tCol, nameCol)
+                  + tFilter + nameFilter
+                  + " GROUP BY {}, {} ".format(tCol, nameCol)
                   + "HAVING count(*) > 1")
-                )
                 
             # Query the database
             cursor.execute(q)
@@ -1037,7 +1043,7 @@ class db:
                 nInd = 2
                 colStr = ','.join(cols)
                 q = ("SELECT {} FROM {}".format(colStr, table) + tFilter
-                     + " ORDER BY {}".format(idCol))
+                     + nameFilter + " ORDER BY {}".format(idCol))
                 cursor.execute(q)
                 
                 # Figure out the 'time flip' to determine the idStr.
