@@ -115,9 +115,6 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
                              bounds=BOUNDS, penalty=ConstrainMystic,
                              disp=False, ftol=FTOL, full_output=True)
         '''
-        # Extract the polynomial coefficients
-        p = np.array(sol[0][0:3])
-        q = np.array(sol[0][3:6])
 
         # Track the polynomial solution for assignment later.
         poly = sol[0]
@@ -139,10 +136,6 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
                        bounds=BOUNDS, options={'ftol': FTOL,
                                                'maxiter': MAXITER})
 
-        # Extract the polynomial coefficients
-        p = np.array(sol.x[0:3])
-        q = np.array(sol.x[3:6])
-
         # Track the polynomial solution for assignment later.
         poly = sol.x
 
@@ -156,6 +149,10 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
     else:
         raise UserWarning(
             'Given solver, {}, is not implemented.'.format(solver))
+
+    # Extract the polynomial coefficients
+    p = np.array(poly[0:3])
+    q = np.array(poly[3:6])
 
     # Convert the polynomial coefficients to GridLAB-D format (fractions and
     # power factors)
@@ -802,7 +799,10 @@ def getTimeFilter(clockObj, datetimeIndex, interval, numInterval=2,
         # Times do not cross day boundary. Use 'and.'
         timeFilter = upperBool & lowerBool
     else:
-        raise UserWarning('Unexpected behavior... Times are equal...')
+        # Times are equal. This can happen for the "fall back" portion of DST.
+        # I suppose we'll use 'or'?
+        timeFilter = upperBool | lowerBool
+        print('Lower and upper times are equal. This is likely DST.')
 
     # Construct overall time filter.
     overallFilter = DoWBool & timeFilter
@@ -991,6 +991,10 @@ if __name__ == '__main__':
 
         # Spin up another process to help, now that we've freed up a core from
         # performing database access.
+        #
+        # TODO: Why does spinning up this process (then trying to kill one)
+        # cause the program to hang (and only on the second time through the
+        # loop)?
         '''
         mp.Process(target=fitForNodeWorker, args=(process_in_queue,
                                                   process_out_queue,
