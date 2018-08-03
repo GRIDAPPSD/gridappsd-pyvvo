@@ -76,7 +76,7 @@ PAR0 = np.array([
 BOUNDS = [(-1.5, 1.5) for x in range(6)]
 
 
-def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
+def zipFit(V, P, Q, Vn=240.0, solver='SLSQP', par0=PAR0):
     """Solve for ZIP coefficients usable by GridLAB-D.
     
     V: voltage magnitude array
