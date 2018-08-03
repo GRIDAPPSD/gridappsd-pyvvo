@@ -15,8 +15,6 @@ import multiprocessing as mp
 from queue import Empty, Queue
 from time import process_time
 import threading
-import sys
-import os
 
 # Installed packages:
 import numpy as np
@@ -127,7 +125,7 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
         err = sol[1]
 
         # Check warnings.
-        # TODO: handle failurs.
+        # TODO: handle failures.
         if sol[4] == 1:
             print('fmin_powell failed: maximum number of function iterations.')
         elif sol[4] == 2:
@@ -417,7 +415,7 @@ def featureScale(x, xRef=None):
 
     # If an entire column is NaN, zero it out.
     if len(xPrime.shape) > 1:
-        # Pandas Dataframe
+        # Pandas DataFrame
         NaNSeries = xPrime.isnull().all()
     elif len(xPrime.shape) == 1:
         # Pandas Series
@@ -479,16 +477,28 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
 
     # Loop over cluster counts from highest to lowest.
     for k in range(n, 0, -1):
+        '''
         # Initialize K Means cluster object, perform clustering in
         # multi-threaded manner.
         # https://stackoverflow.com/questions/38601026/easy-way-to-use-parallel-options-of-scikit-learn-functions-on-hpc
         # https://github.com/scikit-learn/scikit-learn/blob/ed5e127b2460b94dbf3398d97990cb54f188d360/sklearn/externals/joblib/parallel.py
         with parallel_backend('threading'):
+        
             KM = KMeans(n_clusters=k, random_state=randomState,
                         n_jobs=KMTHREADS)
+        '''
 
+        # Initialize K Means cluster object.
+        KM = KMeans(n_clusters=k, random_state=randomState)
+
+        try:
             # Perform the clustering.
             KM.fit(dNorm)
+        except Exception:
+            # If the clustering failed in some way, just move on to the
+            # next possibility.
+            # TODO: what if all fail?
+            continue
 
         # Grab cluster centers.
         centers = KM.cluster_centers_
@@ -721,7 +731,7 @@ def fitForNode(dataIn, randomState=None):
     return outDict
 
 
-def fitForNodeWorker(inQ, outQ, tx, randomSeed=None):
+def fitForNodeWorker(inQ, outQ, tx=None, randomSeed=None):
     """Function designed to perform ZIP fits in a parallel manner (on a
         worker). This should work for either a thread or process. Since this
         is CPU bound, processes make more sense, threads may not provide much
@@ -779,7 +789,8 @@ def fitForNodeWorker(inQ, outQ, tx, randomSeed=None):
             inQ.task_done()
 
             # Always notify that we've finished with this node.
-            tx.send(data_in['node'])
+            if tx is not None:
+                tx.send(data_in['node'])
 
         # Continue to next loop iteration.
 
@@ -857,13 +868,15 @@ def database_worker(db_obj, thread_queue, process_queue):
         # Assign timing.
         data_in['database_time'] = process_time() - t0
 
-        # Put the dictionary in the process_queue.
+        # Put the dictionary in the process_queue. NOTE: this will block until
+        # a free slot is available.
         process_queue.put(data_in)
 
         # Mark this task as complete.
         thread_queue.task_done()
 
         # Continue to next loop iteration.
+
 
 def update_progress(receivers, nodes_in_progress):
     """Helper function to update what nodes we're waiting on for fitting."""
@@ -890,15 +903,95 @@ def update_progress(receivers, nodes_in_progress):
 
     return nodes_in_progress
 
+
+def get_and_start_processes(num_processes, pipe, process_in_queue,
+                            process_out_queue, seed):
+    """Start processes. Returns multiprocessing Process objects.
+
+    INPUTS:
+    num_processes: number of processes to use.
+    pipe: boolean. True --> give process transmitting end of a pipe.
+    process_in_queue: multiprocessing JoinableQueue for input to Processes
+    process_out_queue: multiprocessing Queue for output from Processes
+    seed: random seed to use in Processes
+    """
+
+    # Initialize list to hold process objects.
+    process_objects = []
+
+    # Initialize list to hold pipe connections (receiving end).
+    if pipe:
+        receivers = []
+
+    # Initialize key word arguments for fitForNodeWorker function
+    func_args = {'inQ': process_in_queue, 'outQ': process_out_queue,
+                 'tx': None, 'randomSeed': seed}
+
+    # Create pipe for worker, start each worker.
+    for _ in range(num_processes):
+
+        # Get connections for unidirectional pipe.
+        if pipe:
+            rx, tx = mp.Pipe(duplex=False)
+            receivers.append(rx)
+            func_args['tx'] = tx
+
+        # Initialize process.
+        this_process = mp.Process(target=fitForNodeWorker,
+                                  kwargs=func_args)
+
+        # Start process
+        this_process.start()
+
+        # Track.
+        process_objects.append(this_process)
+
+    # Return.
+    if pipe:
+        return process_objects, receivers
+    else:
+        return process_objects, None
+
+
+def get_and_start_threads(num_threads, db_obj, thread_queue,
+                          process_in_queue):
+    """Helper to start threads. Returns list of thread objects.
+
+    INPUTS:
+    num_threads: number of threads to use.
+    db_obj: db.db object. NOTE: it's pool size should be >= to num_threads
+        in order for multi-threaded database access to be effective.
+    thread_queue: threading Queue for passing data in to the thread.
+    process_in_queue: multiprocessing JoinableQueue for passing data to
+        Processes
+    """
+    # Generate keyword arguments for the database_worker function
+    database_worker_args = {'db_obj': db_obj, 'thread_queue': thread_queue,
+                            'process_queue': process_in_queue}
+    # Start and track threads.
+    thread_objects = []
+    for _ in range(num_threads):
+        # Initialize thread.
+        this_thread = threading.Thread(target=database_worker,
+                                       kwargs=database_worker_args)
+
+        # Start thread.
+        this_thread.start()
+
+        # Track thread.
+        thread_objects.append(this_thread)
+
+    return thread_objects
+
 if __name__ == '__main__':
     # We'll use the 'helper' for times
     from helper import clock
 
     # Times for performing fitting.
-    st = '2016-11-06 00:45:00'
-    et = '2016-11-06 02:15:00'
-    #st = '2016-01-01 05:00:00'
-    #et = '2016-01-01 06:00:00'
+    #st = '2016-11-06 00:45:00'
+    #et = '2016-11-06 02:15:00'
+    st = '2016-01-01 05:00:00'
+    et = '2016-01-01 06:00:00'
     #st = '2016-02-01 00:00:00'
     #et = '2016-08-01 00:00:00'
     # timezone
@@ -961,10 +1054,12 @@ if __name__ == '__main__':
 
     # We'll use threads to pull node data to feed the processes.
     THREADS = 8
+    print('Using {} threads for database access'.format(THREADS))
 
     # Define how many processors/processes to use
     # PROCESSES = mp.cpu_count() - 1
     PROCESSES = 7
+    print('Using {} cores.'.format(PROCESSES))
 
     # Connect to the database.
     dbInputs = {'password': '', 'pool_size': THREADS+1}
@@ -979,45 +1074,22 @@ if __name__ == '__main__':
     process_in_queue = mp.JoinableQueue(maxsize=16)
     process_out_queue = mp.Queue()
 
-    # Start threads.
-    thread_objects = []
-    for _ in range(THREADS):
-        # Initialize thread.
-        this_thread = threading.Thread(target=database_worker,
-                                       args=(db_obj, thread_queue,
-                                             process_in_queue))
+    # Start and track threads.
+    thread_objects = get_and_start_threads(num_threads=THREADS, db_obj=db_obj,
+                                           thread_queue=thread_queue,
+                                           process_in_queue=process_in_queue)
 
-        # Start thread.
-        this_thread.start()
-
-        # Track thread.
-        thread_objects.append(this_thread)
-
-
-    # PROCESSES = 1
-    print('Using {} cores.'.format(str(PROCESSES)))
-
-    # We'll be setting up a pipe for each worker.
-    receivers = []
-
-    # Create pipe for worker, start each worker.
-    process_objects = []
-    for _ in range(PROCESSES):
-
-        # Get connections for unidirectional pipe.
-        rx, tx = mp.Pipe(duplex=False)
-        receivers.append(rx)
-
-        # Initialize process.
-        this_process = mp.Process(target=fitForNodeWorker,
-                                  args=(process_in_queue, process_out_queue,
-                                        tx, seed))
-
-        # Start process.
-        this_process.start()
-
-        # Add it to the list of objects
-        process_objects.append(this_process)
+    # Start and track processes.
+    process_objects, _ = \
+        get_and_start_processes(num_processes=PROCESSES, pipe=False,
+                                process_in_queue=process_in_queue,
+                                process_out_queue=process_out_queue, seed=seed)
+    '''
+    process_objects, receivers = \
+        get_and_start_processes(num_processes=PROCESSES, pipe=True,
+                                process_in_queue=process_in_queue,
+                                process_out_queue=process_out_queue, seed=seed)
+    '''
 
     # Flag for writing headers to file.
     headerFlag = True
@@ -1030,7 +1102,7 @@ if __name__ == '__main__':
     while clockObj.stillTime():
         # Get list of nodes which are in progress (haven't had a fit performed
         # yet)
-        nodes_in_progress = list(nodes)
+        #nodes_in_progress = list(nodes)
 
         # Grab times to use for this interval
         windowStart, windowEnd = clockObj.getWindow()
@@ -1088,6 +1160,7 @@ if __name__ == '__main__':
                                                   seed)).start()
         '''
 
+        '''
         # Loop until all nodes have a fit. This is for debugging, but could be
         # useful to log status as we go.
         while process_out_queue.qsize() < len(nodes):
@@ -1100,8 +1173,9 @@ if __name__ == '__main__':
         nodes_in_progress = \
             update_progress(receivers=receivers,
                             nodes_in_progress=nodes_in_progress)
+        '''
 
-        # Wait for multiprocessing work to finish (it should already be done).
+        # Wait for multiprocessing work to finish.
         process_in_queue.join()
 
         '''        
