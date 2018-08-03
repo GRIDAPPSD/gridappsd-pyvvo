@@ -486,11 +486,12 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
         best_label = square_distance.idxmin()
 
         # If this cluster doesn't have enough data in it, move along.
-        if np.count_nonzero(km.labels_ == best_label) < minClusterSize:
+        label_match = km.labels_ == best_label
+        if np.count_nonzero(label_match) < minClusterSize:
             continue
 
-        # Extract data to perform fit.
-        fit_data = data.loc[km.labels_ == best_label, ['P', 'Q', 'V']]
+        # Extract data to perform fit. ZIP fit only uses P, Q, and V.
+        fit_data = data.loc[label_match, ['P', 'Q', 'V']]
 
         # Perform and evaluate ZIP fit.
         fit_outputs = fitAndEvaluate(fitData=fit_data, Vn=Vn, solver=solver,
@@ -594,7 +595,7 @@ def fitForNode(dataIn, randomState=None):
         P_estimate = Prediction (estimate) of P given V and ZIP coefficients
         Q_estimate = "" of Q ""
     """
-    # Ensure our filter matches our data
+    # Ensure our filter matches our data.
     if len(dataIn['timeFilter']) != dataIn['node_data'].shape[0]:
         raise ValueError('Given bad time filter or start/stop times!')
 
@@ -766,8 +767,8 @@ def computeRMSD(actual, predicted):
     return out
 
 
-def getTimeFilter(clockObj, datetimeIndex, interval, numInterval=2,
-                  clockField='start'):
+def get_time_filters(clockObj, datetimeIndex, interval, numInterval=2,
+                     clockField='start'):
     """Create time filter to use before ZIP fitting.
     
     INPUTS:
@@ -779,34 +780,46 @@ def getTimeFilter(clockObj, datetimeIndex, interval, numInterval=2,
     clockField: First input to clockObj.timeDiff. Defaults to 'start'
     """
     # Grab given hour +/- numInterval intervals.
-    lowerTime = clockObj.timeDiff(clockField, -numInterval * interval).time()
-    upperTime = clockObj.timeDiff(clockField, numInterval * interval).time()
+    lower_time = clockObj.timeDiff(clockField, -numInterval * interval).time()
+    upper_time = clockObj.timeDiff(clockField, numInterval * interval).time()
+
+    # Grab this time.
+    this_time = clockObj.times[clockField]['asTZ'].time()
+
+    # Get logical for all times which are the same as this_time.
+    this_time_boolean = datetimeIndex.time == this_time
 
     # Get logical for all days which are of the same type (weekday vs
-    # weekend)
-    DoWBool = (datetimeIndex.dayofweek >= dayRange[0]) & \
-              (datetimeIndex.dayofweek <= dayRange[1])
+    # weekend).
+    day_of_week_boolean = (datetimeIndex.dayofweek >= dayRange[0]) & \
+                          (datetimeIndex.dayofweek <= dayRange[1])
+
     # Get logical to ensure we're in the time bounds.
-    upperBool = datetimeIndex.time <= upperTime
-    lowerBool = datetimeIndex.time >= lowerTime
+    upper_boolean = datetimeIndex.time <= upper_time
+    lower_boolean = datetimeIndex.time >= lower_time
 
     # Determine how to combine the upper and lower booleans.
-    if lowerTime > upperTime:
+    if lower_time > upper_time:
         # Our times are crossing over the day boundary, need to use 'or.'
-        timeFilter = upperBool | lowerBool
-    elif lowerTime < upperTime:
+        time_filter = upper_boolean | lower_boolean
+    elif lower_time < upper_time:
         # Times do not cross day boundary. Use 'and.'
-        timeFilter = upperBool & lowerBool
+        time_filter = upper_boolean & lower_boolean
     else:
         # Times are equal. This can happen for the "fall back" portion of DST.
         # I suppose we'll use 'or'?
-        timeFilter = upperBool | lowerBool
+        time_filter = upper_boolean | lower_boolean
         print('Lower and upper times are equal. This is likely DST.')
 
-    # Construct overall time filter.
-    overallFilter = DoWBool & timeFilter
+    # Construct time filter which includes correct days of the week and time
+    # intervals.
+    interval_filter = day_of_week_boolean & time_filter
 
-    return overallFilter
+    # Construct time filter which includes correct days of the week and matches
+    # the given time.
+    this_time_filter = day_of_week_boolean & this_time_boolean
+
+    return interval_filter, this_time_filter
 
 
 def database_worker(db_obj, thread_queue, process_queue):
@@ -1083,14 +1096,13 @@ if __name__ == '__main__':
         dayRange = clockObj.dayOfWeekRange()
 
         # Get boolean filters for time.
-
-        timeFilter = getTimeFilter(clockObj=clockObj,
-                                   datetimeIndex=climateData.index,
-                                   interval=intervalSecond,
-                                   numInterval=2, clockField='start')
+        interval_filter, this_time_filter = \
+            get_time_filters(clockObj=clockObj, datetimeIndex=climateData.index,
+                             interval=intervalSecond, numInterval=2,
+                             clockField='start')
 
         # Filter the climate data.
-        climateData = climateData[timeFilter]
+        climateData = climateData[interval_filter]
 
         # Loop over the nodes.
         for node in nodes:
@@ -1104,7 +1116,7 @@ if __name__ == '__main__':
             thread_queue.put({'table': table, 'node': node,
                               'starttime': windowStart, 'stoptime': clockStart,
                               'cluster': True, 'mode': 'test',
-                              'timeFilter': timeFilter,
+                              'timeFilter': interval_filter,
                               'climateData': climateData, 'minClusterSize': 4,
                               'Vn': Vn, 'solver': solver, 'poly': poly})
 
