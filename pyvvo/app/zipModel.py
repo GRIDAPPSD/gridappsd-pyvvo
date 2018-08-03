@@ -486,15 +486,15 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
         best_label = square_distance.idxmin()
 
         # If this cluster doesn't have enough data in it, move along.
-        u, c = np.unique(km.labels_, return_counts=True)
-        if c[u == best_label] < minClusterSize:
+        if np.count_nonzero(km.labels_ == best_label) < minClusterSize:
             continue
 
         # Extract data to perform fit.
         fit_data = data.loc[km.labels_ == best_label, ['P', 'Q', 'V']]
 
+        # Perform and evaluate ZIP fit.
         fit_outputs = fitAndEvaluate(fitData=fit_data, Vn=Vn, solver=solver,
-                                    poly=poly)
+                                     poly=poly)
 
         # Should we consider the sum of these errors? Only look at P? 
         rmsd = fit_outputs['rmsdP'] + fit_outputs['rmsdQ']
