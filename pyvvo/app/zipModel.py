@@ -440,42 +440,32 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
     randomState: numpy random.randomState object for reproducible experiments.
     poly: polynomial to use for starting conditions for the ZIP fit.
     """
-    # Compute maximum possible clusters:
+    # Compute maximum possible clusters.
     n = np.floor(data.shape[0] / minClusterSize).astype(int)
 
-    # Match up columns in data and presentConditions for in determining which
-    # cluster to use.
-    useCol = []
-    excludeColInd = []
-    for colInd, colName in enumerate(data.columns):
-        if colName not in presentConditions.index:
-            # This column shouldn't be used when determining which cluster to
-            # use for fitting.
-            excludeColInd.append(colInd)
-        else:
-            useCol.append(colName)
-
-    # Ensure presentConditions is in the same order as 'data'
-    presentConditions = presentConditions[useCol]
+    # Get the columns which are in presentConditions and data. These are used
+    # for finding the appropriate cluster.
+    cluster_match_cols = data.columns.join(presentConditions.index,
+                                           how='inner')
 
     # Normalize 'data'
-    dNorm = featureScale(x=data)
+    d_norm = featureScale(x=data)
 
     # Normalize presentConditions for finding the right cluster.
-    pc = featureScale(x=presentConditions, xRef=data.loc[:, useCol])
+    pc_norm = featureScale(x=presentConditions, xRef=data[cluster_match_cols])
 
     # Initialize variables for tracking our best fit.
-    bestCoeff = None
-    minRMSD = np.inf
+    best_coeff = None
+    min_rmsd = np.inf
 
     # Loop over cluster counts from highest to lowest.
     for k in range(n, 0, -1):
         # Initialize K Means cluster object.
-        KM = KMeans(n_clusters=k, random_state=randomState)
+        km = KMeans(n_clusters=k, random_state=randomState)
 
         try:
             # Perform the clustering.
-            KM.fit(dNorm)
+            km.fit(d_norm)
         except Exception:
             # If the clustering failed in some way, just move on to the
             # next possibility.
@@ -483,49 +473,40 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
             print('K Means failed. Moving to next cluster iteration.')
             continue
 
-        # Grab cluster centers.
-        centers = KM.cluster_centers_
-
-        # Remove the P and Q information.
-        centers = np.delete(centers, excludeColInd, axis=1)
+        # Grab cluster centers as a DataFrame, extract only the columns we'll
+        # be using to select a cluster.
+        centers = pd.DataFrame(km.cluster_centers_,
+                               columns=d_norm.columns)[cluster_match_cols]
 
         # Use squared Euclidean distance to pick a center.
-        minDistance = np.inf
-        bestLabel = None
+        square_distance = ((centers - pc_norm) ** 2).sum(axis=1)
 
-        for rowInd in range(centers.shape[0]):
-            sqDist = ((pc - centers[rowInd]) ** 2).sum()
-
-            # Update min as necessary
-            if sqDist < minDistance:
-                minDistance = sqDist.sum()
-                bestLabel = rowInd
+        # Get the index of the smallest square distance. We'll use this index
+        # to access the set of K Means "labels" to use.
+        best_label = square_distance.idxmin()
 
         # If this cluster doesn't have enough data in it, move along.
-        u, c = np.unique(KM.labels_, return_counts=True)
-        if c[u == bestLabel] < minClusterSize:
+        u, c = np.unique(km.labels_, return_counts=True)
+        if c[u == best_label] < minClusterSize:
             continue
 
         # Extract data to perform fit.
-        fitData = data.loc[KM.labels_ == bestLabel, ['P', 'Q', 'V']]
+        fit_data = data.loc[km.labels_ == best_label, ['P', 'Q', 'V']]
 
-        fitOutputs = fitAndEvaluate(fitData=fitData, Vn=Vn, solver=solver,
+        fit_outputs = fitAndEvaluate(fitData=fit_data, Vn=Vn, solver=solver,
                                     poly=poly)
 
         # Should we consider the sum of these errors? Only look at P? 
-        rmsd = fitOutputs['rmsdP'] + fitOutputs['rmsdQ']
+        rmsd = fit_outputs['rmsdP'] + fit_outputs['rmsdQ']
 
         # Track if this is the best so far.
-        if rmsd < minRMSD:
-            minRMSD = rmsd
-            minRMSDP = fitOutputs['rmsdP']
-            minRMSDQ = fitOutputs['rmsdQ']
-            # Pout = Pest.copy(deep=True)
-            # Qout = Qest.copy(deep=True)
-            # bestCoeff = copy.deepcopy(coeff)
-            bestCoeff = fitOutputs['coeff']
+        if rmsd < min_rmsd:
+            min_rmsd = rmsd
+            min_rmsd_p = fit_outputs['rmsdP']
+            min_rmsd_q = fit_outputs['rmsdQ']
+            best_coeff = fit_outputs['coeff']
 
-    return bestCoeff, minRMSDP, minRMSDQ
+    return best_coeff, min_rmsd_p, min_rmsd_q
 
 
 def fitAndEvaluate(fitData, Vn, solver, poly=None):
