@@ -696,7 +696,7 @@ def fitForNode(dataIn, randomState=None):
     return outDict
 
 
-def fitForNodeWorker(inQ, outQ, tx=None, randomSeed=None):
+def fitForNodeWorker(inQ, outQ, randomSeed=None):
     """Function designed to perform ZIP fits in a parallel manner (on a
         worker). This should work for either a thread or process. Since this
         is CPU bound, processes make more sense, threads may not provide much
@@ -708,7 +708,6 @@ def fitForNodeWorker(inQ, outQ, tx=None, randomSeed=None):
             See comments for the 'dataIn' input to the 'fitForNode' function to
             see all the fields.
         outQ: multiprocessing Queue which will have results put in it.
-        tx: multiprocessing Pipe connection for sending.
         randomSeed: integer for seeding random number generator.
         
     OUTPUTS:
@@ -752,10 +751,6 @@ def fitForNodeWorker(inQ, outQ, tx=None, randomSeed=None):
             # Always mark the task as done so the program doesn't hang while
             # we wait.
             inQ.task_done()
-
-            # Always notify that we've finished with this node.
-            if tx is not None:
-                tx.send(data_in['node'])
 
         # Continue to next loop iteration.
 
@@ -855,39 +850,12 @@ def database_worker(db_obj, thread_queue, process_queue):
         # Continue to next loop iteration.
 
 
-def update_progress(receivers, nodes_in_progress):
-    """Helper function to update what nodes we're waiting on for fitting."""
-    # Wait until a receiver (or receivers) has a node for us.
-    # ready_rx = mp.connection.wait(receivers)
-    #for rx in ready_rx:
-    for rx in receivers:
-        # Attempt to check if data is ready.
-        try:
-            data_ready = rx.poll()
-        except BrokenPipeError:
-            # What's going on here?
-            # TODO: remove this catch
-            pass
-
-        if data_ready:
-            # Remove this node from the in progress list.
-            try:
-                nodes_in_progress.remove(rx.recv())
-            except ValueError:
-                # No idea how this is happening...
-                # TODO: WHY?!
-                pass
-
-    return nodes_in_progress
-
-
-def get_and_start_processes(num_processes, pipe, process_in_queue,
+def get_and_start_processes(num_processes, process_in_queue,
                             process_out_queue, seed):
     """Start processes. Returns multiprocessing Process objects.
 
     INPUTS:
     num_processes: number of processes to use.
-    pipe: boolean. True --> give process transmitting end of a pipe.
     process_in_queue: multiprocessing JoinableQueue for input to Processes
     process_out_queue: multiprocessing Queue for output from Processes
     seed: random seed to use in Processes
@@ -896,22 +864,12 @@ def get_and_start_processes(num_processes, pipe, process_in_queue,
     # Initialize list to hold process objects.
     process_objects = []
 
-    # Initialize list to hold pipe connections (receiving end).
-    if pipe:
-        receivers = []
-
     # Initialize key word arguments for fitForNodeWorker function
     func_args = {'inQ': process_in_queue, 'outQ': process_out_queue,
-                 'tx': None, 'randomSeed': seed}
+                 'randomSeed': seed}
 
-    # Create pipe for worker, start each worker.
+    # Create, start, and track each worker.
     for _ in range(num_processes):
-
-        # Get connections for unidirectional pipe.
-        if pipe:
-            rx, tx = mp.Pipe(duplex=False)
-            receivers.append(rx)
-            func_args['tx'] = tx
 
         # Initialize process.
         this_process = mp.Process(target=fitForNodeWorker,
@@ -923,11 +881,8 @@ def get_and_start_processes(num_processes, pipe, process_in_queue,
         # Track.
         process_objects.append(this_process)
 
-    # Return.
-    if pipe:
-        return process_objects, receivers
-    else:
-        return process_objects, None
+    # Done.
+    return process_objects
 
 
 def get_and_start_threads(num_threads, db_obj, thread_queue,
@@ -1057,16 +1012,10 @@ if __name__ == '__main__':
                                            process_in_queue=process_in_queue)
 
     # Start and track processes.
-    process_objects, _ = \
-        get_and_start_processes(num_processes=PROCESSES, pipe=False,
+    process_objects = \
+        get_and_start_processes(num_processes=PROCESSES,
                                 process_in_queue=process_in_queue,
                                 process_out_queue=process_out_queue, seed=seed)
-    '''
-    process_objects, receivers = \
-        get_and_start_processes(num_processes=PROCESSES, pipe=True,
-                                process_in_queue=process_in_queue,
-                                process_out_queue=process_out_queue, seed=seed)
-    '''
 
     # Flag for writing headers to file.
     headerFlag = True
@@ -1124,40 +1073,8 @@ if __name__ == '__main__':
         thread_queue.join()
         print('Database fetching complete.')
 
-        # Spin up another process to help, now that we've freed up a core from
-        # performing database access.
-        #
-        # TODO: Why does spinning up this process (then trying to kill one)
-        # cause the program to hang (and only on the second time through the
-        # loop)?
-        '''
-        mp.Process(target=fitForNodeWorker, args=(process_in_queue,
-                                                  process_out_queue,
-                                                  seed)).start()
-        '''
-
-        '''
-        # Loop until all nodes have a fit. This is for debugging, but could be
-        # useful to log status as we go.
-        while process_out_queue.qsize() < len(nodes):
-            # Track what nodes are in progress
-            nodes_in_progress = \
-                update_progress(receivers=receivers,
-                                nodes_in_progress=nodes_in_progress)
-
-        # Track progress once more.
-        nodes_in_progress = \
-            update_progress(receivers=receivers,
-                            nodes_in_progress=nodes_in_progress)
-        '''
-
         # Wait for multiprocessing work to finish.
         process_in_queue.join()
-
-        '''        
-        # Kill a single process (recall we just spun up and extra one).
-        process_in_queue.put(None)
-        '''
 
         # Initialize list for dumping queue data to.
         qList = []
