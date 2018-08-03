@@ -22,7 +22,6 @@ import pandas as pd
 import mystic.solvers as my
 from scipy.optimize import minimize
 from sklearn.cluster import KMeans
-from sklearn.externals.joblib.parallel import parallel_backend
 
 # pyvvo imports
 from db import db
@@ -46,9 +45,6 @@ FTOL = 5e-5
 MAXITER = 500
 
 # GTOL = 5 # Number of iterations without change for fmin_powell
-
-# We'll be running KMeans in a multithreaded manner. Define number of threads.
-KMTHREADS = 8
 
 # Define default initial guess for ZIP models.
 # We'll take the Oscillating Fan from the CVR report: 
@@ -92,10 +88,10 @@ def zipFit(V, P, Q, Vn=240.0, solver='fmin_powell', par0=PAR0):
         solver.
     par0: Initial guess. Should be array of a1, a2, a3, b1, b2, b3
     """
-    # Estimate nominal power
+    # Estimate nominal power.
     Sn = estimateNominalPower(P=P, Q=Q)
 
-    # Massage into standard polynomial format
+    # Massage into standard polynomial format.
     Vbar = V / Vn
     Pbar = P / Sn
     Qbar = Q / Sn
@@ -415,13 +411,15 @@ def featureScale(x, xRef=None):
 
     # If an entire column is NaN, zero it out.
     if len(xPrime.shape) > 1:
-        # Pandas DataFrame
+        # Pandas DataFrame (multi-dimensional)
         NaNSeries = xPrime.isnull().all()
     elif len(xPrime.shape) == 1:
-        # Pandas Series
+        # Pandas Series (1-dimensional)
         NaNSeries = xPrime.isnull()
+    else:
+        raise UserWarning('Something went wrong in featureScale...')
 
-    # Loop and zero out.    
+    # Loop and zero out.
     for index in NaNSeries.index[NaNSeries]:
         xPrime[index] = 0
 
@@ -439,7 +437,7 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
         in a cluster that will be used to perform a ZIP fit.
     Vn: nominal voltage 
     solver: solver (in SOLVERS) to use
-    randomState: numpy random.randomState object for reproducable experiments.
+    randomState: numpy random.randomState object for reproducible experiments.
     poly: polynomial to use for starting conditions for the ZIP fit.
     """
     # Compute maximum possible clusters:
@@ -463,11 +461,6 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
     # Normalize 'data'
     dNorm = featureScale(x=data)
 
-    '''
-    if dNorm.isnull().any().any():
-        pass
-    '''
-
     # Normalize presentConditions for finding the right cluster.
     pc = featureScale(x=presentConditions, xRef=data.loc[:, useCol])
 
@@ -477,17 +470,6 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
 
     # Loop over cluster counts from highest to lowest.
     for k in range(n, 0, -1):
-        '''
-        # Initialize K Means cluster object, perform clustering in
-        # multi-threaded manner.
-        # https://stackoverflow.com/questions/38601026/easy-way-to-use-parallel-options-of-scikit-learn-functions-on-hpc
-        # https://github.com/scikit-learn/scikit-learn/blob/ed5e127b2460b94dbf3398d97990cb54f188d360/sklearn/externals/joblib/parallel.py
-        with parallel_backend('threading'):
-        
-            KM = KMeans(n_clusters=k, random_state=randomState,
-                        n_jobs=KMTHREADS)
-        '''
-
         # Initialize K Means cluster object.
         KM = KMeans(n_clusters=k, random_state=randomState)
 
@@ -498,6 +480,7 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
             # If the clustering failed in some way, just move on to the
             # next possibility.
             # TODO: what if all fail?
+            print('K Means failed. Moving to next cluster iteration.')
             continue
 
         # Grab cluster centers.
