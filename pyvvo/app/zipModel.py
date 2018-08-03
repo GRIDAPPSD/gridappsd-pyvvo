@@ -29,8 +29,10 @@ from sklearn.externals.joblib.parallel import parallel_backend
 # pyvvo imports
 from db import db
 
-# Make numpy error on invalid
-np.seterr(invalid='raise')
+# Make numpy error any time we get a floating point error.
+# At the moment, workers catch exceptions and so we'll just get NaNs in the
+# output file.
+np.seterr(all='raise')
 
 # Constant for ZIP coefficients. ORDER MATTERS!
 ZIPTerms = ['impedance', 'current', 'power']
