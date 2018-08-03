@@ -15,6 +15,8 @@ import multiprocessing as mp
 from queue import Empty, Queue
 from time import process_time
 import threading
+import sys
+import os
 
 # Installed packages:
 import numpy as np
@@ -41,7 +43,7 @@ SOLVERS = ['fmin_powell', 'SLSQP']
 FTOL = 5e-5
 
 # Maximum allowed iterations for SLSQP solver.
-MAXITER = 1000
+MAXITER = 500
 
 # GTOL = 5 # Number of iterations without change for fmin_powell
 
@@ -312,8 +314,13 @@ def getFracAndPF(p, q):
     pf = np.absolute(np.divide(p, f, out=np.ones_like(p), where=(f != 0)))
 
     # Get boolean arrays for where p and q are positive
-    posP = p > 0
-    posQ = q > 0
+    try:
+        posP = p > 0
+        posQ = q > 0
+    except FloatingPointError:
+        # This can happen if the optimization totally fails... Maybe if given
+        # bad starting point?
+        raise
 
     # To meet GridLAB-D conventions, we need to make the power factor negative
     # if it's leading. We also need to flip the fraction if p is negative.
@@ -456,6 +463,11 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
     # Normalize 'data'
     dNorm = featureScale(x=data)
 
+    '''
+    if dNorm.isnull().any().any():
+        pass
+    '''
+
     # Normalize presentConditions for finding the right cluster.
     pc = featureScale(x=presentConditions, xRef=data.loc[:, useCol])
 
@@ -465,8 +477,8 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
 
     # Loop over cluster counts from highest to lowest.
     for k in range(n, 0, -1):
-        # Initalize K Means cluster object, perform clustering in multithreaded
-        # manner.
+        # Initialize K Means cluster object, perform clustering in
+        # multi-threaded manner.
         # https://stackoverflow.com/questions/38601026/easy-way-to-use-parallel-options-of-scikit-learn-functions-on-hpc
         # https://github.com/scikit-learn/scikit-learn/blob/ed5e127b2460b94dbf3398d97990cb54f188d360/sklearn/externals/joblib/parallel.py
         with parallel_backend('threading'):
@@ -707,19 +719,19 @@ def fitForNode(dataIn, randomState=None):
     return outDict
 
 
-def fitForNodeWorker(inQ, outQ, randomSeed=None):
+def fitForNodeWorker(inQ, outQ, tx, randomSeed=None):
     """Function designed to perform ZIP fits in a parallel manner (on a
         worker). This should work for either a thread or process. Since this
         is CPU bound, processes make more sense, threads may not provide much
         parallelization.
     
     INPUTS:
-        dbInputs: dictionary of keyword arguments for db.db constructor.
         inQ: multiprocessing JoinableQueue which will be have data needed to
             perform the fit inserted into it. Each item will be a dictionary.
             See comments for the 'dataIn' input to the 'fitForNode' function to
             see all the fields.
         outQ: multiprocessing Queue which will have results put in it.
+        tx: multiprocessing Pipe connection for sending.
         randomSeed: integer for seeding random number generator.
         
     OUTPUTS:
@@ -745,17 +757,27 @@ def fitForNodeWorker(inQ, outQ, randomSeed=None):
         t0 = process_time()
 
         # Perform ZIP fitting.
-        out_dict = fitForNode(dataIn=data_in, randomState=random_state)
+        try:
+            fit_data = fitForNode(dataIn=data_in, randomState=random_state)
+        except Exception as e:
+            # Something went wrong, simply put the node name in the queue.
+            fit_data = data_in['node']
+        else:
+            # Assign timing, put dictionary in queue.
+            fit_data['processTime'] = process_time() - t0
+            fit_data['database_time'] = data_in['database_time']
 
-        # Assign timing.    
-        out_dict['processTime'] = process_time() - t0
-        out_dict['database_time'] = data_in['database_time']
+        finally:
 
-        # Put the dictionary in the output queue.
-        outQ.put(out_dict)
+            # Always put data in the output queue.
+            outQ.put(fit_data)
 
-        # Mark this task as done.
-        inQ.task_done()
+            # Always mark the task as done so the program doesn't hang while
+            # we wait.
+            inQ.task_done()
+
+            # Always notify that we've finished with this node.
+            tx.send(data_in['node'])
 
         # Continue to next loop iteration.
 
@@ -841,16 +863,42 @@ def database_worker(db_obj, thread_queue, process_queue):
 
         # Continue to next loop iteration.
 
+def update_progress(receivers, nodes_in_progress):
+    """Helper function to update what nodes we're waiting on for fitting."""
+    # Wait until a receiver (or receivers) has a node for us.
+    # ready_rx = mp.connection.wait(receivers)
+    #for rx in ready_rx:
+    for rx in receivers:
+        # Attempt to check if data is ready.
+        try:
+            data_ready = rx.poll()
+        except BrokenPipeError:
+            # What's going on here?
+            # TODO: remove this catch
+            pass
+
+        if data_ready:
+            # Remove this node from the in progress list.
+            try:
+                nodes_in_progress.remove(rx.recv())
+            except ValueError:
+                # No idea how this is happening...
+                # TODO: WHY?!
+                pass
+
+    return nodes_in_progress
 
 if __name__ == '__main__':
     # We'll use the 'helper' for times
     from helper import clock
 
     # Times for performing fitting.
-    #st = '2016-11-06 00:45:00'
-    #et = '2016-11-06 02:15:00'
-    st = '2016-01-01 00:00:00'
-    et = '2016-01-01 02:00:00'
+    st = '2016-11-06 00:45:00'
+    et = '2016-11-06 02:15:00'
+    #st = '2016-01-01 05:00:00'
+    #et = '2016-01-01 06:00:00'
+    #st = '2016-02-01 00:00:00'
+    #et = '2016-08-01 00:00:00'
     # timezone
     tz = 'PST+8PDT'
 
@@ -897,6 +945,11 @@ if __name__ == '__main__':
              'tpm2_R2-12-47-2_tm_137_R2-12-47-2_tn_329',
              'tpm0_R2-12-47-2_tm_168_R2-12-47-2_tn_360'
              ]
+    '''
+
+    nodes = ['tpm0_R2-12-47-2_tm_1_R2-12-47-2_tn_193',
+             'tpm0_R2-12-47-2_tm_6_R2-12-47-2_tn_198']
+    '''
 
     # Initialize some data frames for holding results.
     outDf = pd.DataFrame
@@ -925,17 +978,44 @@ if __name__ == '__main__':
     process_out_queue = mp.Queue()
 
     # Start threads.
+    thread_objects = []
     for _ in range(THREADS):
-        threading.Thread(target=database_worker,
-                         args=(db_obj, thread_queue, process_in_queue)).start()
+        # Initialize thread.
+        this_thread = threading.Thread(target=database_worker,
+                                       args=(db_obj, thread_queue,
+                                             process_in_queue))
+
+        # Start thread.
+        this_thread.start()
+
+        # Track thread.
+        thread_objects.append(this_thread)
+
 
     # PROCESSES = 1
     print('Using {} cores.'.format(str(PROCESSES)))
 
-    # Start process workers.
+    # We'll be setting up a pipe for each worker.
+    receivers = []
+
+    # Create pipe for worker, start each worker.
+    process_objects = []
     for _ in range(PROCESSES):
-        mp.Process(target=fitForNodeWorker,
-                   args=(process_in_queue, process_out_queue, seed)).start()
+
+        # Get connections for unidirectional pipe.
+        rx, tx = mp.Pipe(duplex=False)
+        receivers.append(rx)
+
+        # Initialize process.
+        this_process = mp.Process(target=fitForNodeWorker,
+                                  args=(process_in_queue, process_out_queue,
+                                        tx, seed))
+
+        # Start process.
+        this_process.start()
+
+        # Add it to the list of objects
+        process_objects.append(this_process)
 
     # Flag for writing headers to file.
     headerFlag = True
@@ -946,6 +1026,10 @@ if __name__ == '__main__':
 
     # Loop over time to perform fits and predictions.
     while clockObj.stillTime():
+        # Get list of nodes which are in progress (haven't had a fit performed
+        # yet)
+        nodes_in_progress = list(nodes)
+
         # Grab times to use for this interval
         windowStart, windowEnd = clockObj.getWindow()
         clockStart, clockStop = clockObj.getStartStop()
@@ -988,6 +1072,7 @@ if __name__ == '__main__':
 
         # Wait for database work to be done.
         thread_queue.join()
+        print('Database fetching complete.')
 
         # Spin up another process to help, now that we've freed up a core from
         # performing database access.
@@ -1001,7 +1086,20 @@ if __name__ == '__main__':
                                                   seed)).start()
         '''
 
-        # Wait for multiprocessing work to finish.
+        # Loop until all nodes have a fit. This is for debugging, but could be
+        # useful to log status as we go.
+        while process_out_queue.qsize() < len(nodes):
+            # Track what nodes are in progress
+            nodes_in_progress = \
+                update_progress(receivers=receivers,
+                                nodes_in_progress=nodes_in_progress)
+
+        # Track progress once more.
+        nodes_in_progress = \
+            update_progress(receivers=receivers,
+                            nodes_in_progress=nodes_in_progress)
+
+        # Wait for multiprocessing work to finish (it should already be done).
         process_in_queue.join()
 
         '''        
@@ -1020,26 +1118,52 @@ if __name__ == '__main__':
             except Empty:
                 # Queue is empty, so we have all the data.
                 break
-            else:
-                # Queue isn't empty.
-                thisData['T'] = clockObj.times['start']['str']
-                # Flatten the 'coeff' return, exclude stuff we don't want
-                for key, item in thisData['coeff'].items():
-                    if key == 'poly':
-                        # Track the previous polynomial.
-                        prevPoly[thisData['node']] = thisData['coeff']['poly']
-                    elif key == 'error':
-                        # No need to track optimization error.
-                        continue
 
-                    # Add the item.
-                    thisData[key] = item
+            # Queue isn't empty.
 
-                # Remove the 'coeff' item.
-                thisData.pop('coeff')
+            # If we received a string, then the optimization failed in some
+            # way.
+            if type(thisData) is str:
+                # Make a simple dictionary and put it in the list. Pandas is
+                # smart enough to null out all the other data.
+                qList.append({'node': thisData})
 
-                # Add this dictionary to the list.
-                qList.append(thisData)
+                # Move on to the next iteration of the loop.
+                continue
+
+            # If we got here, the optimization didn't totally fail. Augment
+            # dictionary with timing information.
+            thisData['T'] = clockObj.times['start']['str']
+
+            # Check the sum of the fractions.
+            fraction_sum = thisData['coeff']['impedance_fraction'] + \
+                thisData['coeff']['current_fraction'] + \
+                thisData['coeff']['power_fraction']
+
+            # If the sum isn't reasonably close to 1, then we can get
+            # failures in our solvers by giving it an invalid starting
+            # point.
+            #
+            # TODO: it'd be nice to know what tolerances we should use...
+            coeff_close_to_one = np.isclose(fraction_sum, 1, atol=FTOL)
+
+            # Flatten the 'coeff' return, exclude stuff we don't want.
+            for key, item in thisData['coeff'].items():
+                if key == 'poly' and coeff_close_to_one:
+                    # Track the previous polynomial.
+                    prevPoly[thisData['node']] = thisData['coeff']['poly']
+                elif key == 'error':
+                    # No need to track optimization error.
+                    continue
+
+                # Add the item.
+                thisData[key] = item
+
+            # Remove the 'coeff' item.
+            thisData.pop('coeff')
+
+            # Add this dictionary to the list.
+            qList.append(thisData)
 
         # Create a DataFrame for this timestep, write it to file.
         pd.DataFrame(qList).to_csv(outDfName + '.csv', mode='a',
