@@ -426,13 +426,14 @@ def featureScale(x, xRef=None):
     return xPrime
 
 
-def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
+def findBestClusterFit(data, cluster_selection_data, minClusterSize=4, Vn=240,
                        solver='SLSQP', randomState=None, poly=None):
     """
     
     INPUTS:
     data: pandas DataFrame containing the data to be used for clustering.
-    presentConditions: pandas Series containing data for selecting a cluster
+    cluster_selection_data: pandas Series containing data for selecting a
+        cluster
     minClusterSize: integer defining the smallest number of data points allowed
         in a cluster that will be used to perform a ZIP fit.
     Vn: nominal voltage 
@@ -443,16 +444,16 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
     # Compute maximum possible clusters.
     n = np.floor(data.shape[0] / minClusterSize).astype(int)
 
-    # Get the columns which are in presentConditions and data. These are used
-    # for finding the appropriate cluster.
-    cluster_match_cols = data.columns.join(presentConditions.index,
+    # Get the columns which are in cluster_selection_data and data.
+    # These are used for finding the appropriate cluster.
+    cluster_match_cols = data.columns.join(cluster_selection_data.index,
                                            how='inner')
-
     # Normalize 'data'
     d_norm = featureScale(x=data)
 
-    # Normalize presentConditions for finding the right cluster.
-    pc_norm = featureScale(x=presentConditions, xRef=data[cluster_match_cols])
+    # Normalize cluster_selection_data for finding the right cluster.
+    cluster_select_norm = featureScale(x=cluster_selection_data,
+                                       xRef=data[cluster_match_cols])
 
     # Initialize variables for tracking our best fit.
     best_coeff = None
@@ -479,7 +480,7 @@ def findBestClusterFit(data, presentConditions, minClusterSize=4, Vn=240,
                                columns=d_norm.columns)[cluster_match_cols]
 
         # Use squared Euclidean distance to pick a center.
-        square_distance = ((centers - pc_norm) ** 2).sum(axis=1)
+        square_distance = ((centers - cluster_select_norm) ** 2).sum(axis=1)
 
         # Get the index of the smallest square distance. We'll use this index
         # to access the set of K Means "labels" to use.
@@ -554,13 +555,12 @@ def fitForNode(dataIn, randomState=None):
         stoptime: aware datetime indicating inclusive right time bound.
         cluster: boolean flag. If True, data will be clustered and a ZIP
             fit will be computed for the appropriate cluster. If False,
-            all the data (after being filtered by timeFilter) is used in
+            all the data (after being filtered by interval_filter) is used in
             the ZIP fit.
         mode: 'test' or 'predict.' In 'predict' mode, P, Q, and V are not
             known for the next timestep. In 'test' mode, they are.
-        timeFilter: boolean array used to filter data obtained from the
-            database. Note that climateData (see below) should have used
-            this timeFilter.
+        interval_filter: boolean array used to filter data obtained from the
+            database.
         Vn: nominal voltage for the given node.
         solver: solver to use for performing the ZIP fit. Should be in
             the SOLVERS constant.
@@ -568,15 +568,18 @@ def fitForNode(dataIn, randomState=None):
             will be used (set later down the function chain).
             
         OPTIONAL/DEPENDENT FIELDS:
-        
+
+        cluster_select_mode: either 'weather' or 'time_average.' Only used if
+            'cluster' is True.
+        this_time_filter: Required if cluster_select_mode is 'time_average.'
+            Used to filter node data by the time we're trying to predict for
+            choosing a cluster
         temperature_forecast: forecasted temperature for next time. Only
             used if mode is 'predict' and cluster is True.
         solar_flux_forecast: "" solar_flux ""
-        climateData: pandas dataframe, indexed by time. Columns are 
-            'temperature' and 'solar_flux.' Note that climateData should
-            be pre-filtered by the timeFilter. Only used if 'cluster' is
-            True.
-        minClusterSize: minimum number of datapoints a cluster must have in
+        climateData: pandas DataFrame, indexed by time. Columns are
+            'temperature' and 'solar_flux.' Only used if 'cluster' is True.
+        minClusterSize: minimum number of data points a cluster must have in
             order to be used for fitting. Only used if 'cluster' is True.
             
     randomState: numpy random.RandomState object or None. Used in clustering.
@@ -596,63 +599,86 @@ def fitForNode(dataIn, randomState=None):
         Q_estimate = "" of Q ""
     """
     # Ensure our filter matches our data.
-    if len(dataIn['timeFilter']) != dataIn['node_data'].shape[0]:
+    if len(dataIn['interval_filter']) != dataIn['node_data'].shape[0]:
         raise ValueError('Given bad time filter or start/stop times!')
 
+    # Filter climate data by the interval_filter
+    climate_data_interval = dataIn['climateData'][dataIn['interval_filter']]
+
     # Filter data by time.
-    d = dataIn['node_data'].loc[dataIn['timeFilter'], :]
+    d = dataIn['node_data'].loc[dataIn['interval_filter'], :]
 
     # If we're clustering, associate the climateData.
     if dataIn['cluster']:
         # Associate climate data. Note the climate data has already been 
         # filtered.
-        d = d.merge(dataIn['climateData'], how='outer', on='T')
+        d = d.merge(climate_data_interval, how='outer', on='T')
 
     # Mode will be 'predict' if we don't actually know what P, Q, and V are
-    # for the next time step. Mode will be 'test' if we do know, and want
-    # are 'testing' our prediction powers. 
+    # for the next time step. Mode will be 'test' if we do know, and we are
+    # 'testing' our prediction powers.
     #
     # In 'test' mode, the last row of data is assumed to be the real data
     # for the period which we're testing.
     if dataIn['mode'] == 'test':
         # Grab the data for which we're trying to predict.
-        dActual = d.iloc[-1]
+        this_data = d.iloc[-1]
 
         # Drop it from the DataFrame so we don't include it in our fitting.
-        d = d.drop(dActual.name)
+        d = d.drop(this_data.name)
 
-        # Use the actual data for our "present conditions"
-        if dataIn['cluster']:
-            # We'll have out climate data.
-            fields = ['V', 'temperature', 'solar_flux']
+    elif dataIn['mode'] != 'predict':
+        # Error if given a bad mode.
+        raise ValueError("dataIn['mode'] must be 'test' or 'predict'")
+
+    # Select data for cluster selection.
+    if dataIn['cluster']:
+        # Decide what data to use for cluster selection.
+        if dataIn['cluster_select_mode'] == 'weather':
+
+            if dataIn['mode'] == 'test':
+                # Grab the actual weather data and voltage.
+                cluster_selection_data = this_data[['V', 'temperature',
+                                                    'solar_flux']]
+            elif dataIn['mode'] == 'predict':
+                # Initialize series to hold cluster selection data.
+                cluster_selection_data = pd.Series()
+
+                # In prediction mode, we'll use a forecast if provided, and
+                # otherwise fall back on the most recent data.
+                for f in ['temperature', 'solar_flux']:
+                    try:
+                        # Use the forecasted value.
+                        cluster_selection_data[f] = dataIn[f + '_forecast']
+                    except KeyError:
+                        # Not given a forecast, use last available value.
+                        cluster_selection_data[f] = d.iloc[-1][f]
+
+                # Add voltage data.
+                # TODO: get a voltage prediction instead of using last measured
+                # value.
+                cluster_selection_data['V'] = d.iloc[-1]['V']
+
+        elif dataIn['cluster_select_mode'] == 'time_average':
+            # TODO: clean this up so it plays nicely with the 'predict' mode.
+
+            # Grab a time average of all data, filtered by 'this_time_filter.'
+            cluster_selection_data = \
+                dataIn['node_data'][dataIn['this_time_filter']].mean()
+
+            # Filter and average climate data.
+            # TODO: we probably shouldn't do this. Rather, we should use the
+            # mose recent weather data.
+            climate_this_time = \
+                dataIn['climateData'][dataIn['this_time_filter']].mean()
+
+            # Combine.
+            cluster_selection_data = \
+                cluster_selection_data.append(climate_this_time)
+
         else:
-            # No climate data
-            fields = ['V']
-
-        pc = dActual.loc[fields]
-
-    elif dataIn['mode'] == 'predict':
-        pc = pd.Series()
-
-        if dataIn['cluster']:
-            # Use forecast values for temperature and solar_flux, if they
-            # are given. Otherwise, use last available value.
-            for f in ['temperature', 'solar_flux']:
-                try:
-                    # Use the forecasted value.
-                    pc[f] = dataIn[f + '_forecast']
-                except KeyError:
-                    # Not given a forecast, use last available value.
-                    pc[f] = d.iloc[-1][f]
-
-        # Use the last measured voltage.
-        # TODO: This is the last field measured voltage. We can probably
-        # include the last modeled voltage in here.
-        pc['V'] = d.iloc[-1]['V']
-
-    else:
-        # Mode other than 'test' or 'predict'
-        raise ValueError("Unexpected mode, {}".format(dataIn['mode']))
+            raise ValueError("dataIn['cluster_select_mode'] must be either"
+                             + "'weather' or 'time_average'")
 
     # Initialize return.
     outDict = {}
@@ -662,8 +688,8 @@ def fitForNode(dataIn, randomState=None):
     if dataIn['cluster']:
         # Cluster by P, Q, V, temp, and solar flux, then perform a ZIP fit.
         coeff, rmsdP, rmsdQ = \
-            findBestClusterFit(data=d, presentConditions=pc,
-                               minClusterSize=dataIn['minClusterSize'],
+            findBestClusterFit(data=d, minClusterSize=dataIn['minClusterSize'],
+                               cluster_selection_data=cluster_selection_data,
                                Vn=dataIn['Vn'], solver=dataIn['solver'],
                                randomState=randomState, poly=dataIn['poly'])
 
@@ -680,15 +706,16 @@ def fitForNode(dataIn, randomState=None):
         outDict['rmsdP_train'] = fitOutputs['rmsdP']
         outDict['rmsdQ_train'] = fitOutputs['rmsdQ']
         outDict['coeff'] = fitOutputs['coeff']
+        coeff = fitOutputs['coeff']
 
     # If we're testing, perform the test.
     if dataIn['mode'] == 'test':
         # Use these coefficients to predict the next time interval.
-        Pest, Qest = gldZIP(V=dActual['V'], coeff=coeff, Vn=dataIn['Vn'])
+        Pest, Qest = gldZIP(V=this_data['V'], coeff=coeff, Vn=dataIn['Vn'])
 
-        outDict['V'] = dActual['V']
-        outDict['P_actual'] = dActual['P']
-        outDict['Q_actual'] = dActual['Q']
+        outDict['V'] = this_data['V']
+        outDict['P_actual'] = this_data['P']
+        outDict['Q_actual'] = this_data['Q']
         outDict['P_estimate'] = Pest
         outDict['Q_estimate'] = Qest
 
@@ -738,6 +765,7 @@ def fitForNodeWorker(inQ, outQ, randomSeed=None):
         except Exception as e:
             # Something went wrong, simply put the node name in the queue.
             fit_data = data_in['node']
+            print(e)
         else:
             # Assign timing, put dictionary in queue.
             fit_data['processTime'] = process_time() - t0
@@ -1050,9 +1078,6 @@ if __name__ == '__main__':
                              interval=intervalSecond, numInterval=2,
                              clockField='start')
 
-        # Filter the climate data.
-        climateData = climateData[interval_filter]
-
         # Loop over the nodes.
         for node in nodes:
             # Grab previous polynomial (if it's been set)
@@ -1065,9 +1090,11 @@ if __name__ == '__main__':
             thread_queue.put({'table': table, 'node': node,
                               'starttime': windowStart, 'stoptime': clockStart,
                               'cluster': True, 'mode': 'test',
-                              'timeFilter': interval_filter,
+                              'interval_filter': interval_filter,
+                              'this_time_filter': this_time_filter,
                               'climateData': climateData, 'minClusterSize': 4,
-                              'Vn': Vn, 'solver': solver, 'poly': poly})
+                              'Vn': Vn, 'solver': solver, 'poly': poly,
+                              'cluster_select_mode': 'time_average'})
 
         # Wait for database work to be done.
         thread_queue.join()
