@@ -440,16 +440,20 @@ def findBestClusterFit(data, cluster_selection_data, minClusterSize=4, Vn=240,
     solver: solver (in SOLVERS) to use
     randomState: numpy random.randomState object for reproducible experiments.
     poly: polynomial to use for starting conditions for the ZIP fit.
+
+    NOTE: Only columns which are in common between cluster_selection_data and
+        data are used in clustering and cluster selection.
     """
     # Compute maximum possible clusters.
     n = np.floor(data.shape[0] / minClusterSize).astype(int)
 
-    # Get the columns which are in cluster_selection_data and data.
-    # These are used for finding the appropriate cluster.
+    # Get the columns which are in both cluster_selection_data and data.
+    # These are used for both clustering and finding the appropriate cluster.
     cluster_match_cols = data.columns.join(cluster_selection_data.index,
                                            how='inner')
-    # Normalize 'data'
-    d_norm = featureScale(x=data)
+
+    # Normalize 'data.' Only use columns from cluster_match_cols
+    d_norm = featureScale(x=data[cluster_match_cols])
 
     # Normalize cluster_selection_data for finding the right cluster.
     cluster_select_norm = featureScale(x=cluster_selection_data,
@@ -474,13 +478,11 @@ def findBestClusterFit(data, cluster_selection_data, minClusterSize=4, Vn=240,
             print('K Means failed. Moving to next cluster iteration.')
             continue
 
-        # Grab cluster centers as a DataFrame, extract only the columns we'll
-        # be using to select a cluster.
-        centers = pd.DataFrame(km.cluster_centers_,
-                               columns=d_norm.columns)[cluster_match_cols]
+        # Grab cluster centers as a DataFrame.
+        centers = pd.DataFrame(km.cluster_centers_, columns=d_norm.columns)
 
         # Use squared Euclidean distance to pick a center.
-        square_distance = ((centers - cluster_select_norm) ** 2).sum(axis=1)
+        square_distance = (centers - cluster_select_norm).pow(2).sum(axis=1)
 
         # Get the index of the smallest square distance. We'll use this index
         # to access the set of K Means "labels" to use.
@@ -543,7 +545,7 @@ def fitForNode(dataIn, randomState=None):
     """Perform a cluster (optional) and ZIP fit for a given node and times.
     
     INPUTS:
-    dbObj: db.db object for managing MySQL database interactions.
+    randomState: numpy random state object, or None.
     dataIn: Dictionary. Fields described below.
     
         REQUIRED FIELDS:
@@ -569,11 +571,8 @@ def fitForNode(dataIn, randomState=None):
             
         OPTIONAL/DEPENDENT FIELDS:
 
-        cluster_select_mode: either 'weather' or 'time_average.' Only used if
-            'cluster' is True.
-        this_time_filter: Required if cluster_select_mode is 'time_average.'
-            Used to filter node data by the time we're trying to predict for
-            choosing a cluster
+        this_time_filter: Required if 'cluster' is True. Used to filter node
+            data by the time we're trying to predict for choosing a cluster
         temperature_forecast: forecasted temperature for next time. Only
             used if mode is 'predict' and cluster is True.
         solar_flux_forecast: "" solar_flux ""
@@ -585,7 +584,7 @@ def fitForNode(dataIn, randomState=None):
     randomState: numpy random.RandomState object or None. Used in clustering.
     
     OUTPUTS:
-    outDict: Dictionary with the following fields:
+    out_dict: Dictionary with the following fields:
         node: repeat of dataIn['node']
         rmsdP_train = Root mean square deviation on the training dataset for P.
         rmsdQ_train = "" for Q.
@@ -602,125 +601,110 @@ def fitForNode(dataIn, randomState=None):
     if len(dataIn['interval_filter']) != dataIn['node_data'].shape[0]:
         raise ValueError('Given bad time filter or start/stop times!')
 
-    # Filter climate data by the interval_filter
-    climate_data_interval = dataIn['climateData'][dataIn['interval_filter']]
-
     # Filter data by time.
     d = dataIn['node_data'].loc[dataIn['interval_filter'], :]
 
-    # If we're clustering, associate the climateData.
-    if dataIn['cluster']:
-        # Associate climate data. Note the climate data has already been 
-        # filtered.
-        d = d.merge(climate_data_interval, how='outer', on='T')
+    # Initialize return.
+    out_dict = {'node': dataIn['node']}
 
-    # Mode will be 'predict' if we don't actually know what P, Q, and V are
-    # for the next time step. Mode will be 'test' if we do know, and we are
-    # 'testing' our prediction powers.
-    #
     # In 'test' mode, the last row of data is assumed to be the real data
-    # for the period which we're testing.
+    # for the period which we're testing - it should be dropped.
     if dataIn['mode'] == 'test':
-        # Grab the data for which we're trying to predict.
-        this_data = d.iloc[-1]
+        # Grab the data for which we're trying to predict (last row).
+        test_data = d.iloc[-1]
 
         # Drop it from the DataFrame so we don't include it in our fitting.
-        d = d.drop(this_data.name)
+        d = d.drop(test_data.name)
 
-    elif dataIn['mode'] != 'predict':
-        # Error if given a bad mode.
-        raise ValueError("dataIn['mode'] must be 'test' or 'predict'")
-
-    # Select data for cluster selection.
+    # If we're clustering, associate climateData.
     if dataIn['cluster']:
-        # Decide what data to use for cluster selection.
-        if dataIn['cluster_select_mode'] == 'weather':
+        '''
+        Code below isn't necessary: the findBestClusterFit function will ensure
+        voltage is not used in the clustering.
+         
+        # Drop voltage. We don't want to use this to cluster. Rationale: if our
+        # clustering uses voltage, our clusters are more apt to have very
+        # similar voltage measurements. This means our final ZIP fit will be
+        # less likely to do a good job representing voltage sensitivity, since
+        # the fit is derived from a narrow range of voltages.
+        cluster_data = d.drop(labels='V', axis=1)
+        '''
 
-            if dataIn['mode'] == 'test':
-                # Grab the actual weather data and voltage.
-                cluster_selection_data = this_data[['V', 'temperature',
-                                                    'solar_flux']]
-            elif dataIn['mode'] == 'predict':
-                # Initialize series to hold cluster selection data.
-                cluster_selection_data = pd.Series()
+        # Get filter for climate data.
+        climate_filter = dataIn['interval_filter']
 
-                # In prediction mode, we'll use a forecast if provided, and
-                # otherwise fall back on the most recent data.
-                for f in ['temperature', 'solar_flux']:
-                    try:
-                        # Use the forecasted value.
-                        cluster_selection_data[f] = dataIn[f + '_forecast']
-                    except KeyError:
-                        # Not given a forecast, use last available value.
-                        cluster_selection_data[f] = d.iloc[-1][f]
+        # Initialize pandas Series for the data we'll use to select a cluster.
+        cluster_selection_data = \
+            dataIn['climateData'].iloc[-1][['temperature', 'solar_flux']]
 
-                # Add voltage data.
-                # TODO: get a voltage prediction instead of using last measured
-                # value.
-                cluster_selection_data['V'] = d.iloc[-1]['V']
+        # Get time filter for computing means for P and Q (to be used in the
+        # cluster selection)
+        p_q_filter = dataIn['this_time_filter']
 
-        elif dataIn['cluster_select_mode'] == 'time_average':
-            # TODO: clean this up so it plays nicely with the 'predict' mode.
-
-            # Grab a time average of all data, filtered by 'this_time_filter.'
-            cluster_selection_data = \
-                dataIn['node_data'][dataIn['this_time_filter']].mean()
-
-            # Filter and average climate data.
-            # TODO: we probably shouldn't do this. Rather, we should use the
-            # mose recent weather data.
-            climate_this_time = \
-                dataIn['climateData'][dataIn['this_time_filter']].mean()
-
-            # Combine.
-            cluster_selection_data = \
-                cluster_selection_data.append(climate_this_time)
-
+        # In 'test' mode, we need to ensure we're not cheating and avoid using
+        # the last data row in our clustering + fitting.
+        if dataIn['mode'] == 'test':
+            # Ensure the last climate value isn't used.
+            climate_filter[-1] = False
+            # Ensure we don't use actual P and Q for picking the mean for
+            # cluster selection.
+            p_q_filter[-1] = False
         else:
-            raise ValueError("dataIn['cluster_select_mode'] must be either"
-                             + "'weather' or 'time_average'")
+            # We're in 'predict' mode. Use forecast data if available.
+            for f in ['temperature', 'solar_flux']:
+                try:
+                    # Use the forecasted value.
+                    cluster_selection_data[f] = dataIn[f + '_forecast']
+                except KeyError:
+                    # Not given a forecast, use last available value.
+                    pass
 
-    # Initialize return.
-    outDict = {}
-    outDict['node'] = dataIn['node']
+        # Filter climate data by the climate_filter.
+        climate_data_interval = dataIn['climateData'][climate_filter]
 
-    # Either cluster and perform fit or just perform fit.
-    if dataIn['cluster']:
-        # Cluster by P, Q, V, temp, and solar flux, then perform a ZIP fit.
-        coeff, rmsdP, rmsdQ = \
-            findBestClusterFit(data=d, minClusterSize=dataIn['minClusterSize'],
+        # Associate climate data with node data.
+        cluster_data = d.merge(climate_data_interval, how='outer', on='T')
+
+        # Compute mean P and Q for the prediction time, using p_q_filter.
+        cluster_selection_data = cluster_selection_data.append(
+            dataIn['node_data'][['P', 'Q']][p_q_filter].mean())
+
+        # Cluster by P, Q, temp, and solar flux, use our cluster_selection_data
+        # to select a cluster, then finally perform a ZIP fit.
+        coeff, rmsd_p, rmsd_q = \
+            findBestClusterFit(data=cluster_data,
+                               minClusterSize=dataIn['minClusterSize'],
                                cluster_selection_data=cluster_selection_data,
                                Vn=dataIn['Vn'], solver=dataIn['solver'],
                                randomState=randomState, poly=dataIn['poly'])
 
-        # Put outputs in the outDict.
-        outDict['rmsdP_train'] = rmsdP
-        outDict['rmsdQ_train'] = rmsdQ
-        outDict['coeff'] = coeff
-
+        # Put outputs in the out_dict.
+        out_dict['rmsdP_train'] = rmsd_p
+        out_dict['rmsdQ_train'] = rmsd_q
+        out_dict['coeff'] = coeff
     else:
         # No clustering, just fit.
         fitOutputs = fitAndEvaluate(fitData=d, Vn=Vn, solver=solver,
                                     poly=dataIn['poly'])
-        # Put outputs in the outDict.
-        outDict['rmsdP_train'] = fitOutputs['rmsdP']
-        outDict['rmsdQ_train'] = fitOutputs['rmsdQ']
-        outDict['coeff'] = fitOutputs['coeff']
+        # Put outputs in the out_dict.
+        out_dict['rmsdP_train'] = fitOutputs['rmsdP']
+        out_dict['rmsdQ_train'] = fitOutputs['rmsdQ']
+        out_dict['coeff'] = fitOutputs['coeff']
         coeff = fitOutputs['coeff']
 
     # If we're testing, perform the test.
     if dataIn['mode'] == 'test':
         # Use these coefficients to predict the next time interval.
-        Pest, Qest = gldZIP(V=this_data['V'], coeff=coeff, Vn=dataIn['Vn'])
+        Pest, Qest = gldZIP(V=test_data['V'], coeff=coeff, Vn=dataIn['Vn'])
 
-        outDict['V'] = this_data['V']
-        outDict['P_actual'] = this_data['P']
-        outDict['Q_actual'] = this_data['Q']
-        outDict['P_estimate'] = Pest
-        outDict['Q_estimate'] = Qest
+        out_dict['V'] = test_data['V']
+        out_dict['P_actual'] = test_data['P']
+        out_dict['Q_actual'] = test_data['Q']
+        out_dict['P_estimate'] = Pest
+        out_dict['Q_estimate'] = Qest
 
     # All done.
-    return outDict
+    return out_dict
 
 
 def fitForNodeWorker(inQ, outQ, randomSeed=None):
@@ -950,8 +934,8 @@ if __name__ == '__main__':
     # Times for performing fitting.
     #st = '2016-11-06 00:45:00'
     #et = '2016-11-06 02:15:00'
-    st = '2016-01-01 05:00:00'
-    et = '2016-01-01 06:00:00'
+    st = '2016-01-01 00:00:00'
+    et = '2016-01-02 00:00:00'
     #st = '2016-02-01 00:00:00'
     #et = '2016-08-01 00:00:00'
     # timezone
@@ -1093,8 +1077,7 @@ if __name__ == '__main__':
                               'interval_filter': interval_filter,
                               'this_time_filter': this_time_filter,
                               'climateData': climateData, 'minClusterSize': 4,
-                              'Vn': Vn, 'solver': solver, 'poly': poly,
-                              'cluster_select_mode': 'time_average'})
+                              'Vn': Vn, 'solver': solver, 'poly': poly})
 
         # Wait for database work to be done.
         thread_queue.join()
