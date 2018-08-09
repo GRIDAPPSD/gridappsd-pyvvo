@@ -1093,8 +1093,15 @@ if __name__ == '__main__':
         while True:
             try:
                 # Grab data from the queue.
-                thisData = process_out_queue.get_nowait()
+                thisData = process_out_queue.get(block=True, timeout=1)
             except Empty:
+                # Note that queue.Empty exceptions are raised for both timeouts
+                # and trying to "get" from an Empty queue.
+
+                # If we timed out, something weird is going on...
+                if not process_out_queue.empty():
+                    print('We encountered a queue timeout! Which is weird...')
+
                 # Queue is empty, so we have all the data.
                 break
 
