@@ -441,19 +441,17 @@ def findBestClusterFit(data, cluster_selection_data, minClusterSize=4, Vn=240,
     randomState: numpy random.randomState object for reproducible experiments.
     poly: polynomial to use for starting conditions for the ZIP fit.
 
-    NOTE: Only columns which are in common between cluster_selection_data and
-        data are used in clustering and cluster selection.
+    NOTE: Only columns from cluster_selection_data are used for cluster
+        selection. However, all columns in 'data' are used for fitting.
     """
     # Compute maximum possible clusters.
     n = np.floor(data.shape[0] / minClusterSize).astype(int)
 
-    # Get the columns which are in both cluster_selection_data and data.
-    # These are used for both clustering and finding the appropriate cluster.
-    cluster_match_cols = data.columns.join(cluster_selection_data.index,
-                                           how='inner')
+    # Get reference to cluster selection columns.
+    cluster_match_cols = cluster_selection_data.index
 
-    # Normalize 'data.' Only use columns from cluster_match_cols
-    d_norm = featureScale(x=data[cluster_match_cols])
+    # Normalize 'data.'
+    d_norm = featureScale(x=data)
 
     # Normalize cluster_selection_data for finding the right cluster.
     cluster_select_norm = featureScale(x=cluster_selection_data,
@@ -475,14 +473,16 @@ def findBestClusterFit(data, cluster_selection_data, minClusterSize=4, Vn=240,
             # If the clustering failed in some way, just move on to the
             # next possibility.
             # TODO: what if all fail?
-            print('K Means failed. Moving to next cluster iteration.')
+            print('WARNING: K Means failed. Moving to next cluster iteration.')
             continue
 
         # Grab cluster centers as a DataFrame.
         centers = pd.DataFrame(km.cluster_centers_, columns=d_norm.columns)
 
-        # Use squared Euclidean distance to pick a center.
-        square_distance = (centers - cluster_select_norm).pow(2).sum(axis=1)
+        # Use squared Euclidean distance to pick a center. Only compute
+        # distance for columns in our cluster selection.
+        square_distance = (centers[cluster_match_cols]
+                           - cluster_select_norm).pow(2).sum(axis=1)
 
         # Get the index of the smallest square distance. We'll use this index
         # to access the set of K Means "labels" to use.
@@ -573,6 +573,9 @@ def fitForNode(dataIn, randomState=None):
 
         this_time_filter: Required if 'cluster' is True. Used to filter node
             data by the time we're trying to predict for choosing a cluster
+        pq_avg: boolean. If True, 'node_data' will be filtered by
+            'this_time_filter,' and the average P and Q will be used in cluster
+            selection. Only used if 'cluster' is True.
         temperature_forecast: forecasted temperature for next time. Only
             used if mode is 'predict' and cluster is True.
         solar_flux_forecast: "" solar_flux ""
@@ -666,8 +669,9 @@ def fitForNode(dataIn, randomState=None):
         cluster_data = d.merge(climate_data_interval, how='outer', on='T')
 
         # Compute mean P and Q for the prediction time, using p_q_filter.
-        cluster_selection_data = cluster_selection_data.append(
-            dataIn['node_data'][['P', 'Q']][p_q_filter].mean())
+        if dataIn['pq_avg']:
+            cluster_selection_data = cluster_selection_data.append(
+                dataIn['node_data'][['P', 'Q']][p_q_filter].mean())
 
         # Cluster by P, Q, temp, and solar flux, use our cluster_selection_data
         # to select a cluster, then finally perform a ZIP fit.
@@ -935,7 +939,7 @@ if __name__ == '__main__':
     #st = '2016-11-06 00:45:00'
     #et = '2016-11-06 02:15:00'
     st = '2016-01-01 00:00:00'
-    et = '2016-01-02 00:00:00'
+    et = '2016-01-01 01:00:00'
     #st = '2016-02-01 00:00:00'
     #et = '2016-08-01 00:00:00'
     # timezone
@@ -1077,7 +1081,8 @@ if __name__ == '__main__':
                               'interval_filter': interval_filter,
                               'this_time_filter': this_time_filter,
                               'climateData': climateData, 'minClusterSize': 4,
-                              'Vn': Vn, 'solver': solver, 'poly': poly})
+                              'Vn': Vn, 'solver': solver, 'poly': poly,
+                              'pq_avg': False})
 
         # Wait for database work to be done.
         thread_queue.join()
