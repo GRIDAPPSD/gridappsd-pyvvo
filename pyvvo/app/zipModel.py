@@ -1122,7 +1122,7 @@ if __name__ == '__main__':
             if type(thisData) is str:
                 # Make a simple dictionary and put it in the list. Pandas is
                 # smart enough to null out all the other data.
-                qList.append({'node': thisData})
+                qList.append({'node': thisData, 'T': clockStart})
 
                 # Log it.
                 log.write(('{}: Optimization failed for node {}.'
@@ -1133,7 +1133,7 @@ if __name__ == '__main__':
 
             # If we got here, the optimization didn't totally fail. Augment
             # dictionary with timing information.
-            thisData['T'] = start_str
+            thisData['T'] = clockStart
 
             # Check the sum of the fractions.
             fraction_sum = thisData['coeff']['impedance_fraction'] + \
