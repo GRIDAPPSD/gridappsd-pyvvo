@@ -70,10 +70,9 @@ PAR0 = np.array([
 # a3 = P%cos(thetaP), b4 = P%sin(thetaP)
 #
 # Note that sin and cos are always between -1 and 1, and our ZIP fractions
-# shouldn't normally exceed 1. Since it's possible to get negative fraction
-# terms, we should allow terms to go slightly higher than -1, 1, hence the -1.5
-# to 1.5
-BOUNDS = [(-1.5, 1.5) for x in range(6)]
+# shouldn't normally exceed 1. It is possible for fractions to be negative, but
+# the other two terms should be able to make up for that.
+BOUNDS = [(-1, 1) for x in range(6)]
 
 
 def zipFit(V, P, Q, Vn=240.0, solver='SLSQP', par0=PAR0):
@@ -143,7 +142,8 @@ def zipFit(V, P, Q, Vn=240.0, solver='SLSQP', par0=PAR0):
         if not sol.success:
             # Failed to solve. For now, just print.
             # TODO: handle failures.
-            print('SLSQP failed: {}'.format(sol.message))
+            #print('SLSQP failed: {}'.format(sol.message))
+            pass
     else:
         raise UserWarning(
             'Given solver, {}, is not implemented.'.format(solver))
@@ -935,6 +935,9 @@ if __name__ == '__main__':
     # We'll use the 'helper' for times
     from helper import clock
 
+    # Get a log.
+    log = open('log.txt', 'w')
+
     # Times for performing fitting.
     #st = '2016-11-06 00:45:00'
     #et = '2016-11-06 02:15:00'
@@ -1049,6 +1052,7 @@ if __name__ == '__main__':
         # Grab times to use for this interval
         windowStart, windowEnd = clockObj.getWindow()
         clockStart, clockStop = clockObj.getStartStop()
+        start_str = clockObj.times['start']['str']
 
         # Get the climate data for window up to start time. This will include
         # present conditions for testing purposes.
@@ -1105,7 +1109,8 @@ if __name__ == '__main__':
 
                 # If we timed out, something weird is going on...
                 if not process_out_queue.empty():
-                    print('We encountered a queue timeout! Which is weird...')
+                    s = '{}: Queue timeout! Which is weird.'.format(start_str)
+                    log.write(s)
 
                 # Queue is empty, so we have all the data.
                 break
@@ -1119,12 +1124,16 @@ if __name__ == '__main__':
                 # smart enough to null out all the other data.
                 qList.append({'node': thisData})
 
+                # Log it.
+                log.write(('{}: Optimization failed for node {}.'
+                           ).format(start_str, thisData))
+
                 # Move on to the next iteration of the loop.
                 continue
 
             # If we got here, the optimization didn't totally fail. Augment
             # dictionary with timing information.
-            thisData['T'] = clockObj.times['start']['str']
+            thisData['T'] = start_str
 
             # Check the sum of the fractions.
             fraction_sum = thisData['coeff']['impedance_fraction'] + \
@@ -1137,6 +1146,26 @@ if __name__ == '__main__':
             #
             # TODO: it'd be nice to know what tolerances we should use...
             coeff_close_to_one = np.isclose(fraction_sum, 1, atol=FTOL)
+
+            # Notify if our coefficients aren't close to one.
+            if not coeff_close_to_one:
+                s = ('{}: Coefficient sum not close to one for node {}. Sum: '
+                     + '{}').format(start_str, thisData['node'], fraction_sum)
+                log.write(s)
+
+            # Notify if we're out of bounds.
+            out_of_bounds = False
+            for ind, term in enumerate(thisData['coeff']['poly']):
+                # Bounds for all terms are the same.
+                if (term < BOUNDS[0][0]) or (term > BOUNDS[0][1]):
+                    out_of_bounds = True
+                    break
+
+            if out_of_bounds:
+                s = ('{}: Polynomial term out of bounds for node {}. Terms: {}'
+                     ).format(start_str, thisData['node'],
+                              thisData['coeff']['poly'])
+                log.write(s)
 
             # Flatten the 'coeff' return, exclude stuff we don't want.
             for key, item in thisData['coeff'].items():
@@ -1167,6 +1196,9 @@ if __name__ == '__main__':
 
         # Advance clock.
         clockObj.advanceTime()
+
+    # Close the log.
+    log.close()
 
     # Send the process the "kill signal."
     for _ in range(PROCESSES):
