@@ -329,8 +329,9 @@ def getFracAndPF(p, q):
     b = (~posP) & (~posQ)
     f[b] = f[b] * -1
 
-    # p < 0 and q > 0: leading power factor, flip fraction
+    # p < 0 and q > 0: negative load and leading power factor, flip both
     b = (~posP) & posQ
+    f[b] = f[b] * -1
     pf[b] = pf[b] * -1
 
     return f, pf
