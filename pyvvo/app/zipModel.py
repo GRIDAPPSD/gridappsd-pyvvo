@@ -194,17 +194,22 @@ def ZIPObjective(Params, Vbar, Pbar, Qbar):
     Pbar: numpy array of real power divided by nominal apparent power
     Qbar: numpy array of reactive power divided by nominal apparent power
     
-    OUTPUT:
-    sum((Pbar - (a1*Vbar^2 + a2*Vbar +a3))^2 
-        + (Qbar - (b1*Vbar^2 + b2*Vbar + b3)))/length(Vbar)
+    OUTPUT: sum squared error divided by number of "rows."
     """
     # Pre-compute Vbar^2
     Vs = np.square(Vbar)
 
+    # Get GridLAB-D terms from the polynomial parameters.
+    gld_zip = polyToGLD(Params[:3], Params[3:])
+    # Add base power - since base power is baked into the 'bar' terms,
+    # just use 1.
+    gld_zip['base_power'] = 1
+    # Calculate P and Q. Note that nominal voltage is baked in - use
+    # 1 for Vn.
+    p_predicted, q_predicted = gldZIP(V=Vbar, coeff=gld_zip, Vn=1)
+
     # Compute sum of squared error.
-    e = np.sum(
-        np.square(Pbar - (Params[0] * Vs + Params[1] * Vbar + Params[2])) \
-        + np.square(Qbar - (Params[3] * Vs + Params[4] * Vbar + Params[5])))
+    e = np.sum(np.square(Pbar - p_predicted) + np.square(Qbar - q_predicted))
 
     # Return squared error normalized by length of elements.
     return e / Vbar.shape[0]
@@ -376,14 +381,18 @@ def gldZIP(V, coeff, Vn):
 
         d[k] = (real, imag)
 
+    # Pre-compute voltage terms.
+    v_v_n = V / Vn
+    v_squared = np.square(v_v_n)
+
     # Compute P and Q
-    P_z = (V ** 2 / Vn ** 2) * d['impedance'][0]
-    P_i = (V / Vn) * d['current'][0]
+    P_z = v_squared * d['impedance'][0]
+    P_i = v_v_n * d['current'][0]
     P_p = d['power'][0]
     P = P_z + P_i + P_p
 
-    Q_z = (V ** 2 / Vn ** 2) * d['impedance'][1]
-    Q_i = (V / Vn) * d['current'][1]
+    Q_z = v_squared * d['impedance'][1]
+    Q_i = v_v_n * d['current'][1]
     Q_p = d['power'][1]
     Q = Q_z + Q_i + Q_p
 
