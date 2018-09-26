@@ -1,9 +1,11 @@
-'''
+"""
 This is the 'main' module for the application
 
 Created on Jan 25, 2018
 
 @author: thay838
+"""
+
 '''
 # Standard library imports:
 # Prefer simplejson package
@@ -20,6 +22,14 @@ import logging
 import copy
 #import traceback
 
+# pyvvo imports:
+import sparqlCIM
+import db
+import modGLM
+import population
+import constants as CONST
+from helper import clock
+
 # Get this directory.
 THISDIR = os.path.dirname(os.path.realpath(__file__))
 
@@ -29,15 +39,19 @@ if THISDIR not in sys.path:
     
 # get the config file
 CONFIGFILE = os.path.join(THISDIR, 'config.json')
+'''
+# gridappsd-python imports
+from gridappsd import GridAPPSD
 
-# pyvvo imports:
-import sparqlCIM
-import db
-import modGLM
-import population
-import constants as CONST
-from helper import clock
-    
+# Standard library
+import logging as log
+
+# pyvvo
+import sparql_queries
+
+# Logging.
+log.basicConfig(level=log.INFO)
+
 def main():
     # Current, as of 04/19: 
     # 8500: _4F76A5F9-271D-9EB8-5E31-AA362D86F2C3
@@ -183,7 +197,8 @@ def main():
     
     print(bestInd)
     print('hoorah')
-    
+
+
 def readConfig():
     """Helper function to read pyvvo configuration file.
     """
@@ -191,6 +206,7 @@ def readConfig():
         config = json.load(c)    
     
     return config
+
 
 def buildRecorderDicts(energyInterval, powerInterval, voltageInterval, 
                        energyPowerMeter, triplexGroup, recordMode,
@@ -241,6 +257,7 @@ def buildRecorderDicts(energyInterval, powerInterval, voltageInterval,
     
     return recorders
 
+
 def setupLog(logConfig):
     """Helper to setup the log.
     
@@ -272,6 +289,113 @@ def setupLog(logConfig):
     
     return log
 
+
+def get_model_id(gridappsd_object, model_name):
+    """Given a model's name, get it's ID from the platform."""
+    # Get model information.
+    log.debug('Calling GridAPPSD.query_model_info.')
+    result = gridappsd_object.query_model_info()
+
+    #
+    if not result['responseComplete']:
+        s = ('GridAPPSD.query_model_info responseComplete field not return '
+             'True.')
+        log.error(s)
+        raise UserWarning(s)
+    else:
+        log.debug('GridAPPSD.query_model_info call successful.')
+
+    # Loop over the models until we find our model_name, and get its ID.
+    model_id = None
+    for model in result['data']['models']:
+        if model['modelName'] == model_name:
+            model_id = model['modelId']
+
+    log.debug('Model ID for {} is {}'.format(model_name, model_id))
+
+    if model_id is None:
+        s = 'Could not find the model ID for {}.'.format(MODEL)
+        log.error(s)
+        raise UserWarning(s)
+
+    return model_id
+
+
+def get_all_model_data(gridappsd_object, model_id):
+    """Helper to pull all requisite model data for pyvvo.
+
+    This includes: voltage regulators, capacitors, load nominal
+        voltages, swing bus voltage, and load measurement data.
+    """
+    # Define dictionary for each type of data.
+    data_list = [
+        {'type': 'voltage_regulator',
+         'query_string': sparql_queries.REGULATOR_QUERY,
+         'parse_function': sparql_queries.parse_regulator_query
+         },
+        {'type': 'capacitor',
+         'query_string': sparql_queries.CAPACITOR_QUERY,
+         'parse_function': sparql_queries.parse_capacitor_query
+         },
+        {'type': 'load_nominal_voltage',
+         'query_string': sparql_queries.LOAD_NOMINAL_VOLTAGE_QUERY,
+         'parse_function': sparql_queries.parse_load_nominal_voltage_query
+         },
+        {'type': 'swing_voltage',
+         'query_string': sparql_queries.SWING_VOLTAGE_QUERY,
+         'parse_function': sparql_queries.parse_swing_voltage_query
+         },
+        {'type': 'load_measurements',
+         'query_string': sparql_queries.LOAD_MEASUREMENTS_QUERY,
+         'parse_function': sparql_queries.parse_load_measurements_query
+         },
+    ]
+
+    # Initialize return.
+    out = {}
+
+    # Loop over the data.
+    for data_dict in data_list:
+        out[data_dict['type']] = query_and_parse(
+            gridappsd_object=gridappsd_object,
+            query_string=data_dict['query_string'].format(fdrid=model_id),
+            parse_function=data_dict['parse_function'],
+            log_string=data_dict['type'].replace('_', ' '))
+
+    return out
+
+
+def query_and_parse(gridappsd_object, query_string, parse_function,
+                    log_string):
+    # Get data.
+    data = gridappsd_object.query_data(query_string)
+    log.info('Retrieved {} data.'.format(log_string))
+
+    # Parse data.
+    data_parsed = parse_function(data['data']['results']['bindings'])
+    log.info('Parsed {} data'.format(log_string))
+
+    return data_parsed
+
+
 if __name__ == '__main__':
     #main(fdrid='_4F76A5F9-271D-9EB8-5E31-AA362D86F2C3')
-    main()
+    #main()
+    # For development, hard-code this machine's internal IP.
+    IP = '192.168.0.33'
+    # For now, hard-code GridAPPSD port. Later, get from environment
+    # variable.
+    PORT = 61613
+    gridappsd_object = GridAPPSD(address=('192.168.0.33', 61613))
+
+    # We'll be using the 8500 node feeder.
+    MODEL = 'ieee8500'
+
+    # Get ID for feeder.
+    model_id = get_model_id(gridappsd_object=gridappsd_object,
+                            model_name=MODEL)
+    log.info('Retrieved model ID.')
+
+    # Get all relevant model data.
+    model_data = get_all_model_data(gridappsd_object, model_id)
+    pass
