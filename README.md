@@ -1,20 +1,7 @@
 # Dependencies and Installation
-## Submodule: "gridappsd-python"
-In order to interact with the GridAPPS-D platform, the pyvvo application depends on the ["gridappsd-python"](https://github.com/GRIDAPPSD/gridappsd-python) repository and its package, "gridappsd." This repository has been included in this one as a [git submodule](https://git-scm.com/docs/git-submodule). After cloning the gridappsd-pyvvo repository, you'll need to change directories into the top level "gridappsd-python" directory and enter two git commands:
-```Shell Session
-$ git submodule init
-$ git submodule update
-```
-
-Alternatively, while cloning the gridappsd-pyvvo repository, you can pass the `--recurse-submodules` option to the `git clone` command like so:
-```Shell Session
-$ git clone --recurse-submodules https://github.com/GRIDAPPSD/gridappsd-pyvvo.git
-```
-
-The simplest way to keep the "gridappsd-python" repository up to date within this repository is by running:
-```Shell Session
-$ git submodule update --remote gridappsd-python
-```
+## Docker
+This application is intended to be used with docker. See the Dockerfile.
+TODO: add more details.
 
 ## Git Large File Storage (LFS)
 This repository contains some .xml and .glm files which are quite large. To keep the repository light, these files are tracked with git lfs. 
@@ -30,33 +17,7 @@ To install [source](https://github.com/git-lfs/git-lfs/wiki/Installation):
 3. Install: `sudo apt-get install git-lfs`
 4. Activate: `git lfs install`
 
-## Python
-This application works in Python 3. It is recommended that you use the latest version, which was 3.6.5 at the time of writing. On Ubuntu, installation of Python 3.6.x requires the addition of [Felix Krull's deadsnakes PPA](https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa):
-```Shell Session
-$ sudo add-apt-repository ppa:deadsnakes/ppa
-$ sudo apt-get update
-$ sudo apt-get install python3.6
-```
-
-There's a helper script to perform this: install/python36Setup.sh.
-
-## Python packages
-There is an included "requirements.txt" file in the "pyvvo" directory. Note that the "gridappsd-python" also has a "requirements.txt" file, so we'll need to install those packages too. Python's pip package manager can be used to easily install packages. Here's an example if you're installing the packages for the entire system:
-```Shell Session
-$ cd ~/gridappsd-pyvvo/pyvvo
-$ sudo -H python3.6 -m pip install -r requirements.txt
-$ cd ../gridappsd-python
-$ sudo -H python3.6 -m pip install -r requirements.txt
-```
-
-## Helper shell scripts
-In the top level "install" directory, there are helper scripts for installing MySQL, GridLAB-D, Python3.6, etc.
-MySQL installtion + configuration should be performed before GridLAB-D.
-
 # MySQL Configuration
-## Installation
-You can use the script install/MySQLSetup.sh to install MySQL and the MySQL Connector/C. This script also does
-some helpful configuration for connecting with GridLAB-D and the pyvvo application.
 
 ## InnoDB
 Ensure that the MySQL global variables `innod_db_buffer_pool_size` and `innodb_buffer_pool_instances` are set adequately high.
