@@ -9,8 +9,9 @@ import math
 import re
 import datetime
 import dateutil.tz
-import constants
 import copy
+
+import constants
 
 # Compile some regular expressions for detection of complex number forms
 RECT_EXP = re.compile(r'[+-]*([0-9])+(\.)*([0-9])*(e[+-]*([0-9])+)*[+-]([0-9])+(\.)*([0-9])*(e[+-]([0-9])+)*j')

@@ -41,13 +41,19 @@ if THISDIR not in sys.path:
 CONFIGFILE = os.path.join(THISDIR, 'config.json')
 '''
 # gridappsd-python imports
-from gridappsd import GridAPPSD
+from gridappsd import GridAPPSD, topics
 
 # Standard library
 import logging as log
 
+# Installed
+import simplejson as json
+from simplejson.errors import JSONDecodeError
+
 # pyvvo
 import sparql_queries
+import modGLM
+import constants as CONST
 
 # Logging.
 log.basicConfig(level=log.INFO)
@@ -199,10 +205,10 @@ def main():
     print('hoorah')
 
 
-def readConfig():
+def readConfig(config_file):
     """Helper function to read pyvvo configuration file.
     """
-    with open(CONFIGFILE) as c:
+    with open(config_file) as c:
         config = json.load(c)    
     
     return config
@@ -381,6 +387,9 @@ def query_and_parse(gridappsd_object, query_string, parse_function,
 if __name__ == '__main__':
     #main(fdrid='_4F76A5F9-271D-9EB8-5E31-AA362D86F2C3')
     #main()
+    # Read configuration file.
+    config = readConfig('config.json')
+
     # For development, hard-code this machine's internal IP.
     IP = '192.168.0.33'
     # For now, hard-code GridAPPSD port. Later, get from environment
@@ -398,4 +407,42 @@ if __name__ == '__main__':
 
     # Get all relevant model data.
     model_data = get_all_model_data(gridappsd_object, model_id)
-    pass
+
+    # Get the GridLAB-D model
+    # TODO: add to the Python API.
+    payload = {'configurationType': 'GridLAB-D Base GLM',
+               'parameters': {'model_id': model_id}}
+    gld_model = gridappsd_object.get_response(topic=topics.CONFIG,
+                                              message=payload,
+                                              timeout=30)
+    log.info('GridLAB-D model received.')
+
+    # HARD-CODE remove the json remnants from the message.
+    gld_model['message'] = gld_model['message'][8:-43]
+    log.warn('Bad json from GridLAB-D model removed via hard-code.')
+
+    # Get a modGLM model to modify the base model.
+    modelObj = modGLM.modGLM(strModel=gld_model['message'],
+                             pathModelOut='test.glm'
+                             )
+    log.info('modGLM object instantiated.')
+
+    # Set up the model to run.
+    st = '2016-01-01 00:00:00'
+    et = '2016-01-01 01:00:00'
+    tz = 'PST+8PDT'
+    swingMeterName = \
+        modelObj.setupModel(starttime=st,
+                            stoptime=et, timezone=tz,
+                            #database=config['GLD-DB'],
+                            database=None,
+                            powerflowFlag=True,
+                            vSource=model_data['swing_voltage'],
+                            triplexGroup=CONST.LOADS['triplex']['group'],
+                            triplexList=model_data['load_nominal_voltage'][
+                                'triplex']['meters']
+                            )
+
+    # Write the base model
+    modelObj.writeModel()
+    log.info('Base GridLAB-D model configured.')
