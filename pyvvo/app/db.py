@@ -7,6 +7,10 @@ Created on Aug 29, 2017
 
 @author: thay838
 '''
+# BIZARRE STUFF: Importing pandas at the end of this block causes a
+# segmentation fault in my docker container. However, having it here
+# does not.
+import pandas as pd
 import mysql.connector
 import mysql.connector.pooling as pooling
 from mysql.connector import errorcode
@@ -15,8 +19,7 @@ from helper import strRepDict
 import constants
 import time
 import datetime
-import numpy as np
-import pandas as pd
+#import numpy as np
 
 # Define how we handle time bounds.
 LEFT_BOUND = '>='
@@ -44,7 +47,7 @@ class db:
     
     def __init__(self, user='gridlabd', password='gridlabd',
                  host='localhost', database='gridlabd',
-                 pool_size=1, **kwargs):
+                 pool_size=1, port=3306, **kwargs):
         """Initializing the db class creates a pool of database connections.
         """
         # Set attributes
@@ -52,6 +55,7 @@ class db:
         self.password=password
         self.host=host
         self.database=database
+        self.port=port
         
         # Handle pool size --> make sure server can handle it.
         # Make a single server connection, and check 'max_connections'
@@ -112,7 +116,8 @@ class db:
                                                password=self.password,
                                                host=self.host,
                                                database=self.database,
-                                               pool_size=self.pool_size)
+                                               pool_size=self.pool_size,
+                                               port=self.port)
         except mysql.connector.Error as err:
             self._printError(err)
             raise err
@@ -188,13 +193,14 @@ class db:
                                            password=self.password,
                                            host=self.host,
                                            database=self.database,
+                                           port=self.port,
                                            use_pure=use_pure)
         except mysql.connector.Error as err:
             self._printError(err)
             raise err
         else:
             return cnxn
-        
+
     @staticmethod
     def _printError(err):
         """Print a connection error.

@@ -325,7 +325,8 @@ class population:
         while g < self.numGen:
             # Wait until all models have been run and evaluated.
             self.modelQueue.join()
-            self.log.info('All model runs are complete.')
+            self.log.info(('All model runs are complete for generation {'
+                          '}.').format(g + 1))
             
             # If this is the first generation and we're tracking a baseline, 
             # save the requisite information.
@@ -344,12 +345,15 @@ class population:
                                               reg=self.baselineData['reg'],
                                               cap=self.baselineData['cap'])
                 self.log.debug('Baseline individual data assigned.')
+                self.log.info('Baseline costs: {:.2f}'.format(bInd.costs))
             
             # Sort the individualsList by score.
             self.individualsList.sort(key=lambda x: x.costs['total'])
             
             # Track best score for this generation.
             self.generationBest.append(self.individualsList[0].costs['total'])
+            self.log.info('Lowest cost for this generation: {:.2f}'.format(
+                self.generationBest[-1]))
             
             # Increment generation counter.
             g += 1
@@ -369,12 +373,14 @@ class population:
                 # Replenish the population by crossing and mutating individuals
                 # then run their models.
                 self.crossMutateRun()
-                msg = 'Cross and mutate complete for generation {}'.format(g)
-                msg += ' All models should be running.'
+                msg = 'Cross and mutate complete for generation {}.'.format(g)
+                msg += (' All models should now be running for generation {' \
+                        '}.').format(g+1)
                 self.log.info(msg)
         
         # Done.
         self.log.info('Genetic algorithm complete.')
+        self.log.info('Lowest cost: {:.2f}'.format(self.generationBest[-1]))
         # Return the best individual.
         return self.individualsList[0]
     

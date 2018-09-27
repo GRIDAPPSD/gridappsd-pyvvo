@@ -54,6 +54,9 @@ from simplejson.errors import JSONDecodeError
 import sparql_queries
 import modGLM
 import constants as CONST
+from db import db
+from helper import clock
+import population
 
 # Logging.
 log.basicConfig(level=log.INFO)
@@ -392,6 +395,13 @@ if __name__ == '__main__':
 
     # For development, hard-code this machine's internal IP.
     IP = '192.168.0.33'
+
+    # Using a different port so as not to conflict with gridappsd mysql
+    MYSQL_PORT = 3307
+    # Override the MySQL host and port
+    config['GLD-DB']['host'] = IP
+    config['GLD-DB']['port'] = MYSQL_PORT
+
     # For now, hard-code GridAPPSD port. Later, get from environment
     # variable.
     PORT = 61613
@@ -423,26 +433,91 @@ if __name__ == '__main__':
 
     # Get a modGLM model to modify the base model.
     modelObj = modGLM.modGLM(strModel=gld_model['message'],
-                             pathModelOut='test.glm'
+                             pathModelOut='test.glm', pathModelIn='pyvvo.glm'
                              )
     log.info('modGLM object instantiated.')
 
     # Set up the model to run.
     st = '2016-01-01 00:00:00'
     et = '2016-01-01 01:00:00'
-    tz = 'PST+8PDT'
-    swingMeterName = \
-        modelObj.setupModel(starttime=st,
-                            stoptime=et, timezone=tz,
-                            #database=config['GLD-DB'],
-                            database=None,
-                            powerflowFlag=True,
-                            vSource=model_data['swing_voltage'],
-                            triplexGroup=CONST.LOADS['triplex']['group'],
-                            triplexList=model_data['load_nominal_voltage'][
-                                'triplex']['meters']
-                            )
+    tz = 'UTC0'
+    # db_dict = {**config['GLD-DB'], 'tz_offset': }
+    swing_meter_name = modelObj.setupModel(
+        starttime=st, stoptime=et, timezone=tz, database=config['GLD-DB'],
+        powerflowFlag=True, vSource=model_data['swing_voltage'],
+        triplexGroup=CONST.LOADS['triplex']['group'],
+        triplexList=model_data['load_nominal_voltage']['triplex']['meters']
+    )
 
     # Write the base model
     modelObj.writeModel()
-    log.info('Base GridLAB-D model configured.')
+    log.info('Base GridLAB-D model configured and written to file.')
+
+    # Connect to the MySQL database for GridLAB-D simulations
+    dbObj = db(**config['GLD-DB'],
+               pool_size=config['GLD-DB-OTHER']['NUM-CONNECTIONS'])
+    log.info('Connected to MySQL database for GridLAB-D simulation output.')
+
+    # Clear out the database while testing.
+    # TODO: take this out?
+    dbObj.dropAllTables()
+    log.warning('All tables dropped in {}'.format(config['GLD-DB']['database']))
+
+    # Build dictionary of recorder definitions which individuals in the
+    # population will add to their model. We'll use the append record mode.
+    # This can be risky! If you're not careful about clearing the database out
+    # between subsequent test runs, you can write duplicate rows.
+    recorders = buildRecorderDicts(
+        energyInterval=config['INTERVALS']['OPTIMIZATION'],
+        powerInterval=config['INTERVALS']['SAMPLE'],
+        voltageInterval=config['INTERVALS']['SAMPLE'],
+        energyPowerMeter=swing_meter_name,
+        triplexGroup=CONST.LOADS['triplex']['group'],
+        recordMode='a',
+        query_buffer_limit=config['GLD-DB-OTHER']['QUERY_BUFFER_LIMIT']
+    )
+    log.info('Recorder dictionaries created.')
+
+    # Convert costs from fraction of nominal voltage to actual voltage
+    # Get pointer to costs dict.
+    costs = config['COSTS']
+    costs['undervoltage']['limit'] = \
+        (costs['undervoltage']['limit']
+         * model_data['load_nominal_voltage']['triplex']['v'])
+    costs['overvoltage']['limit'] = \
+        (costs['overvoltage']['limit']
+         * model_data['load_nominal_voltage']['triplex']['v'])
+    log.info('Voltage fractions converted to actual voltage.')
+
+    # Initialize a clock object for datetimes.
+    clockObj = clock(startStr=st, finalStr=et,
+                     interval=config['INTERVALS']['OPTIMIZATION'],
+                     tzStr=tz)
+    log.info('Clock object initialized')
+
+    # Initialize a population.
+    # TODO - let's get the 'inPath' outta here. It's really just being used for
+    # model naming, and we may as well be more explicit about that.
+    sdt, edt = clockObj.getStartStop()
+    popObj = population.population(
+        strModel=modelObj.strModel, numInd=config['GA']['INDIVIDUALS'],
+        numGen=config['GA']['GENERATIONS'],
+        numModelThreads=config['GA']['THREADS'], recorders=recorders,
+        dbObj=dbObj, starttime=sdt, stoptime=edt,
+        timezone=tz, inPath=modelObj.pathModelIn,
+        outDir='/pyvvo/pyvvo/models',
+        reg=model_data['voltage_regulator'], cap=model_data['capacitor'],
+        costs=costs, probabilities=config['PROBABILITIES'],
+        gldInstall=config['GLD-INSTALLATION'],
+        randomSeed=config['RANDOM-SEED'],
+        log=log)
+
+    log.info('Population object initialized.')
+
+    log.info('Starting genetic algorithm...')
+    bestInd = popObj.ga()
+    log.info('Shutting down genetic algorithm threads...')
+    popObj.stopThreads()
+
+    log.info('Best individual: {}'.format(bestInd))
+
