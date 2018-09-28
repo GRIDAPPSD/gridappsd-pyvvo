@@ -1,50 +1,15 @@
 """
-This is the 'main' module for the application
+This is the 'main' module for the pyvvo application
 
 Created on Jan 25, 2018
 
 @author: thay838
 """
-
-'''
-# Standard library imports:
-# Prefer simplejson package
-try:
-    import simplejson as json
-    from simplejson.errors import JSONDecodeError
-except ImportError:
-    import json
-    import json.JSONDecodeError as JSONDecodeError
-    
-import os
-import sys
-import logging
-import copy
-#import traceback
-
-# pyvvo imports:
-import sparqlCIM
-import db
-import modGLM
-import population
-import constants as CONST
-from helper import clock
-
-# Get this directory.
-THISDIR = os.path.dirname(os.path.realpath(__file__))
-
-# If this directory isn't on Python's path, add it
-if THISDIR not in sys.path:
-    sys.path.insert(0, THISDIR)
-    
-# get the config file
-CONFIGFILE = os.path.join(THISDIR, 'config.json')
-'''
 # gridappsd-python imports
-from gridappsd import GridAPPSD, topics
+from gridappsd import GridAPPSD, topics, utils
 
 # Standard library
-import logging as log
+import logging
 
 # Installed
 import simplejson as json
@@ -54,170 +19,25 @@ from simplejson.errors import JSONDecodeError
 import sparql_queries
 import modGLM
 import constants as CONST
-from db import db
-from helper import clock
+import db
+import helper
 import population
 
+
 # Logging.
-log.basicConfig(level=log.INFO)
+# logging.basicConfig(level=logging.INFO)
+# log = logging.getLogger(__name__)
 
-def main():
-    # Current, as of 04/19: 
-    # 8500: _4F76A5F9-271D-9EB8-5E31-AA362D86F2C3
-    # R2: _0663ADF2-FC00-45BE-858E-50B3D1D01696
-    
-    # fdrid='_0663ADF2-FC00-45BE-858E-50B3D1D01696'
-    # fdrid='_9CE150A8-8CC5-A0F9-B67E-BBD8C79D3095'
-    
-    #define VSOURCE=66395.3
-    #include "test8500_base.glm";
-    
-    #define VSOURCE=57735.0
-    #include "testR2_base.glm";
-    
-    """Main function.
-    """
-    # Read the config file.
-    try:
-        config = readConfig()
-    except JSONDecodeError as err:
-        print('Config file, {}, not properly formatted!'.format(CONFIGFILE),
-              file=sys.stderr)
-        print(err, file=sys.stderr)
-        print('Exiting...', file=sys.stderr)
-        exit(1)
-    
-    # Setup the log.
-    log = setupLog(logConfig=config['LOG'])
-    log.info('Configuration file read, log configured.')
-    
-    # Get sparqlCIM object, get regulator and capacitor data.
-    sparqlObj = sparqlCIM.sparqlCIM(**config['BLAZEGRAPH'])
-    reg = sparqlObj.getRegs(fdrid=config['FEEDER']['ID'])
-    cap = sparqlObj.getCaps(fdrid=config['FEEDER']['ID'])
-    log.info('Regulator and Capacitor information pulled from blazegraph.')
-    
-    # Get dictionary of loads and their nominal voltages
-    loadV = sparqlObj.getLoadNomV(fdrid=config['FEEDER']['ID'])
-    swingV = sparqlObj.getSwingVoltage(fdrid=config['FEEDER']['ID'])
-    log.info('Load and swing bus nominal voltage data pulled from blazegraph.')
-    
-    # Get dictionary of load measurements
-    loadM = sparqlObj.getLoadMeasurements(fdrid=config['FEEDER']['ID'])
-    log.info('Load measurement data pulled from blazegraph.')
-    
-    # Ensure we have a measurement for all loads.
-    # TODO: Eventually we should have a way to handle unmeasured loads.
-    for loadType in loadV:
-        for m in loadV[loadType]['meters']:
-            if m not in loadM:
-                # If we're missing it, throw an error
-                raise UserWarning('Meter {} is not being "measured"!'.format(m))
-            
-    log.info('Confirmed that all EnergyConsumers have measurements.')
-         
-    # Connect to the MySQL database for gridlabd simulations
-    dbObj = db.db(**config['GLD-DB'],
-                  pool_size=config['GLD-DB-OTHER']['NUM-CONNECTIONS'])
-    log.info('Connected to MySQL database for GridLAB-D simulation output.')
-    
-    # Clear out the database while testing.
-    # TODO: take this out?
-    dbObj.dropAllTables()
-    log.warning('All tables dropped in {}'.format(config['GLD-DB']['database']))
-    
-    outDir = config['PATHS']['outDir']
-    baseModel = 'test.glm'
-    baseOut = os.path.join(outDir, baseModel)
-    # Get a modGLM model to modify the base model.
-    modelObj = modGLM.modGLM(pathModelIn=config['PATHS']['baseModel'],
-                             pathModelOut=baseOut
-                            )
-    
-    # Set up the model to run.
-    st = '2016-01-01 00:00:00'
-    et = '2016-01-01 01:00:00'
-    tz = 'PST+8PDT'
-    swingMeterName = \
-        modelObj.setupModel(starttime=st,
-                            stoptime=et, timezone=tz,
-                            database=config['GLD-DB'],
-                            powerflowFlag=True,
-                            vSource=swingV,
-                            #vSource=config['FEEDER']['SUBSTATION-VOLTAGE'],
-                            triplexGroup=CONST.LOADS['triplex']['group'],
-                            triplexList=loadV['triplex']['meters']
-                            )
-    
-    # Write the base model
-    modelObj.writeModel()
-    log.info('Base GridLAB-D model configured.')
-    
-    # Initialize a clock object for datetimes.
-    clockObj = clock(startStr=st, finalStr=et,
-                     interval=config['INTERVALS']['OPTIMIZATION'],
-                     tzStr=tz)
-    log.info('Clock object initialized')
-    
-    # Build dictionary of recorder definitions which individuals in the
-    # population will add to their model. We'll use the append record mode.
-    # This can be risky! If you're not careful about clearing the database out
-    # between subsequent test runs, you can write duplicate rows.
-    recorders = \
-        buildRecorderDicts(energyInterval=config['INTERVALS']['OPTIMIZATION'],
-                           powerInterval=config['INTERVALS']['SAMPLE'],
-                           voltageInterval=config['INTERVALS']['SAMPLE'],
-                           energyPowerMeter=swingMeterName,
-                           triplexGroup=CONST.LOADS['triplex']['group'],
-                           recordMode='a',
-                           query_buffer_limit=config['GLD-DB-OTHER']['QUERY_BUFFER_LIMIT'])
-    
-    # Convert costs from fraction of nominal voltage to actual voltage
-    costs = copy.copy(config['COSTS'])
-    costs['undervoltage']['limit'] = (costs['undervoltage']['limit']
-                                      * loadV['triplex']['v'])
-    costs['overvoltage']['limit'] = (costs['overvoltage']['limit']
-                                     * loadV['triplex']['v'])
-    
-    # Initialize a population.
-    # TODO - let's get the 'inPath' outta here. It's really just being used for
-    # model naming, and we may as well be more explicit about that.
-    popObj = population.population(strModel=modelObj.strModel,
-                                   numInd=config['GA']['INDIVIDUALS'],
-                                   numGen=config['GA']['GENERATIONS'],
-                                   numModelThreads=config['GA']['THREADS'],
-                                   recorders=recorders,
-                                   dbObj=dbObj,
-                                   starttime=clockObj.start_dt,
-                                   stoptime=clockObj.stop_dt,
-                                   timezone=tz,
-                                   inPath=modelObj.pathModelIn,
-                                   outDir=outDir,
-                                   reg=reg, cap=cap,
-                                   costs=costs,
-                                   probabilities=config['PROBABILITIES'],
-                                   gldInstall=config['GLD-INSTALLATION'],
-                                   randomSeed=config['RANDOM-SEED'],
-                                   log=log)
-    
-    log.info('Population object initialized.')
-    
-    bestInd = popObj.ga()
-    
-    print(bestInd)
-    print('hoorah')
-
-
-def readConfig(config_file):
+def read_config(config_file):
     """Helper function to read pyvvo configuration file.
     """
     with open(config_file) as c:
-        config = json.load(c)    
-    
+        config = json.load(c)
+
     return config
 
 
-def buildRecorderDicts(energyInterval, powerInterval, voltageInterval, 
+def buildRecorderDicts(energyInterval, powerInterval, voltageInterval,
                        energyPowerMeter, triplexGroup, recordMode,
                        query_buffer_limit):
     """Helper function to construct dictionaries to be used by individuals to
@@ -230,44 +50,45 @@ def buildRecorderDicts(energyInterval, powerInterval, voltageInterval,
     We could add custom table definitions in the future, but why?
     """
     recorders = {
-    'energy': {'objType': 'recorder',
-               'properties': {'parent': energyPowerMeter,
-                              'table': 'energy',
-                              'interval': energyInterval,
-                              'propList': ['measured_real_energy',],
-                              'limit': -1,
-                              'mode': recordMode,
-                              'query_buffer_limit': query_buffer_limit
-                              }
-               },
-    'power': {'objType': 'recorder',
-              'properties': {'parent': energyPowerMeter,
-                             'table': 'power',
-                             'interval': powerInterval,
-                             'propList': ['measured_real_power',
-                                          'measured_reactive_power'],
-                             'limit': -1,
-                             'mode': recordMode,
-                             'query_buffer_limit': query_buffer_limit
-                            }
-               },
-    'triplexVoltage': {'objType': 'recorder',
-                       'properties': {'group': triplexGroup,
-                                      'propList': ['measured_voltage_1.mag',
-                                                   'measured_voltage_2.mag'],
-                                      'interval': voltageInterval,
-                                      'table': 'triplexVoltage',
-                                      'limit': -1,
-                                      'mode': recordMode,
-                                      'query_buffer_limit': query_buffer_limit
-                                      }
-                       }
+        'energy': {'objType': 'recorder',
+                   'properties': {'parent': energyPowerMeter,
+                                  'table': 'energy',
+                                  'interval': energyInterval,
+                                  'propList': ['measured_real_energy', ],
+                                  'limit': -1,
+                                  'mode': recordMode,
+                                  'query_buffer_limit': query_buffer_limit
+                                  }
+                   },
+        'power': {'objType': 'recorder',
+                  'properties': {'parent': energyPowerMeter,
+                                 'table': 'power',
+                                 'interval': powerInterval,
+                                 'propList': ['measured_real_power',
+                                              'measured_reactive_power'],
+                                 'limit': -1,
+                                 'mode': recordMode,
+                                 'query_buffer_limit': query_buffer_limit
+                                 }
+                  },
+        'triplexVoltage': {'objType': 'recorder',
+                           'properties': {'group': triplexGroup,
+                                          'propList': [
+                                              'measured_voltage_1.mag',
+                                              'measured_voltage_2.mag'],
+                                          'interval': voltageInterval,
+                                          'table': 'triplexVoltage',
+                                          'limit': -1,
+                                          'mode': recordMode,
+                                          'query_buffer_limit': query_buffer_limit
+                                          }
+                           }
     }
-    
+
     return recorders
 
 
-def setupLog(logConfig):
+def setup_log(log_config):
     """Helper to setup the log.
     
     INPUTS:
@@ -277,29 +98,37 @@ def setupLog(logConfig):
     OUTPUTS:
     logging.Logger object
     """
-    
+
     # Set up the log.
     log = logging.getLogger(__name__)
     # Set log level.
-    level = getattr(logging, logConfig['LEVEL'].upper())
+    level = getattr(logging, log_config['LEVEL'].upper())
     log.setLevel(level)
     # Create file handler for log.
-    f_h = logging.FileHandler(filename=logConfig['FILE'],
-                              mode=logConfig['MODE'])
+    if log_config['FILE']:
+        # Use a file handler.
+        handler = logging.FileHandler(filename=log_config['FILE'],
+                                      mode=log_config['MODE'])
+    else:
+        # Use a stream handler.
+        handler = logging.StreamHandler()
+
     # Set its level.
-    f_h.setLevel(level)
+    handler.setLevel(level)
     # Create formatter for file handler. Use date format in constants module.
-    formatter = logging.Formatter(logConfig['FORMAT'],
-                                  datefmt=CONST.DATE_FMT)
+    formatter = logging.Formatter(log_config['FORMAT'],
+                                  datefmt=log_config['DATE_FMT'])
+    # Previously used format:
+    # "[%(asctime)s] [thread %(thread)d] [%(module)s] [%(levelname)s]: %(message)s"
     # Attach the formatter to the file handler.
-    f_h.setFormatter(formatter)
+    handler.setFormatter(formatter)
     # Attach the file handler to the log
-    log.addHandler(f_h)
-    
+    log.addHandler(handler)
+
     return log
 
 
-def get_model_id(gridappsd_object, model_name):
+def get_model_id(gridappsd_object, model_name, log):
     """Given a model's name, get it's ID from the platform."""
     # Get model information.
     log.debug('Calling GridAPPSD.query_model_info.')
@@ -330,7 +159,7 @@ def get_model_id(gridappsd_object, model_name):
     return model_id
 
 
-def get_all_model_data(gridappsd_object, model_id):
+def get_all_model_data(gridappsd_object, model_id, log):
     """Helper to pull all requisite model data for pyvvo.
 
     This includes: voltage regulators, capacitors, load nominal
@@ -369,13 +198,13 @@ def get_all_model_data(gridappsd_object, model_id):
             gridappsd_object=gridappsd_object,
             query_string=data_dict['query_string'].format(fdrid=model_id),
             parse_function=data_dict['parse_function'],
-            log_string=data_dict['type'].replace('_', ' '))
+            log_string=data_dict['type'].replace('_', ' '), log=log)
 
     return out
 
 
 def query_and_parse(gridappsd_object, query_string, parse_function,
-                    log_string):
+                    log_string, log):
     # Get data.
     data = gridappsd_object.query_data(query_string)
     log.info('Retrieved {} data.'.format(log_string))
@@ -387,36 +216,47 @@ def query_and_parse(gridappsd_object, query_string, parse_function,
     return data_parsed
 
 
-if __name__ == '__main__':
-    #main(fdrid='_4F76A5F9-271D-9EB8-5E31-AA362D86F2C3')
-    #main()
+def main():
     # Read configuration file.
-    config = readConfig('config.json')
+    config = read_config('config.json')
+
+    # Setup log.
+    log = setup_log(config['LOG'])
+    log.info('Log configured.')
 
     # For development, hard-code this machine's internal IP.
-    IP = '192.168.0.33'
+    # MYSQL_HOST = '192.168.0.33'
+    # In docker-compose, use the service name.
+    MYSQL_HOST = 'mysql-pyvvo'
 
-    # Using a different port so as not to conflict with gridappsd mysql
-    MYSQL_PORT = 3307
-    # Override the MySQL host and port
-    config['GLD-DB']['host'] = IP
+    # When running inside the platform, use standard MySQL port.
+    MYSQL_PORT = 3306
+
+    # MYSQL_PORT is different when running outside the platform.
+    # MYSQL_PORT = 3307
+
+    # Override the MySQL host and port.
+    config['GLD-DB']['host'] = MYSQL_HOST
     config['GLD-DB']['port'] = MYSQL_PORT
 
-    # For now, hard-code GridAPPSD port. Later, get from environment
-    # variable.
-    PORT = 61613
-    gridappsd_object = GridAPPSD(address=('192.168.0.33', 61613))
+    # Initialize GridAPPSD object from within the platform.
+    gridappsd_object = GridAPPSD(address=utils.get_gridappsd_address(),
+                                 username=utils.get_gridappsd_user(),
+                                 password=utils.get_gridappsd_pass())
+
+    # Initialize GridAPPSD object when outside the platform.
+    # gridappsd_object = GridAPPSD(address=('192.168.0.33', 61613))
 
     # We'll be using the 8500 node feeder.
     MODEL = 'ieee8500'
 
     # Get ID for feeder.
     model_id = get_model_id(gridappsd_object=gridappsd_object,
-                            model_name=MODEL)
+                            model_name=MODEL, log=log)
     log.info('Retrieved model ID.')
 
     # Get all relevant model data.
-    model_data = get_all_model_data(gridappsd_object, model_id)
+    model_data = get_all_model_data(gridappsd_object, model_id, log=log)
 
     # Get the GridLAB-D model
     # TODO: add to the Python API.
@@ -432,17 +272,17 @@ if __name__ == '__main__':
     log.warn('Bad json from GridLAB-D model removed via hard-code.')
 
     # Get a modGLM model to modify the base model.
-    modelObj = modGLM.modGLM(strModel=gld_model['message'],
-                             pathModelOut='test.glm', pathModelIn='pyvvo.glm'
-                             )
+    model_obj = modGLM.modGLM(strModel=gld_model['message'],
+                              pathModelOut='test.glm', pathModelIn='pyvvo.glm'
+                              )
     log.info('modGLM object instantiated.')
 
     # Set up the model to run.
     st = '2016-01-01 00:00:00'
-    et = '2016-01-01 01:00:00'
+    et = '2016-01-01 00:15:00'
     tz = 'UTC0'
     # db_dict = {**config['GLD-DB'], 'tz_offset': }
-    swing_meter_name = modelObj.setupModel(
+    swing_meter_name = model_obj.setupModel(
         starttime=st, stoptime=et, timezone=tz, database=config['GLD-DB'],
         powerflowFlag=True, vSource=model_data['swing_voltage'],
         triplexGroup=CONST.LOADS['triplex']['group'],
@@ -450,18 +290,19 @@ if __name__ == '__main__':
     )
 
     # Write the base model
-    modelObj.writeModel()
+    model_obj.writeModel()
     log.info('Base GridLAB-D model configured and written to file.')
 
     # Connect to the MySQL database for GridLAB-D simulations
-    dbObj = db(**config['GLD-DB'],
-               pool_size=config['GLD-DB-OTHER']['NUM-CONNECTIONS'])
+    db_obj = db.db(**config['GLD-DB'],
+                   pool_size=config['GLD-DB-OTHER']['NUM-CONNECTIONS'])
     log.info('Connected to MySQL database for GridLAB-D simulation output.')
 
     # Clear out the database while testing.
     # TODO: take this out?
-    dbObj.dropAllTables()
-    log.warning('All tables dropped in {}'.format(config['GLD-DB']['database']))
+    db_obj.dropAllTables()
+    log.warning(
+        'All tables dropped in {}'.format(config['GLD-DB']['database']))
 
     # Build dictionary of recorder definitions which individuals in the
     # population will add to their model. We'll use the append record mode.
@@ -490,21 +331,21 @@ if __name__ == '__main__':
     log.info('Voltage fractions converted to actual voltage.')
 
     # Initialize a clock object for datetimes.
-    clockObj = clock(startStr=st, finalStr=et,
-                     interval=config['INTERVALS']['OPTIMIZATION'],
-                     tzStr=tz)
+    clockObj = helper.clock(startStr=st, finalStr=et,
+                            interval=config['INTERVALS']['OPTIMIZATION'],
+                            tzStr=tz)
     log.info('Clock object initialized')
 
     # Initialize a population.
     # TODO - let's get the 'inPath' outta here. It's really just being used for
     # model naming, and we may as well be more explicit about that.
     sdt, edt = clockObj.getStartStop()
-    popObj = population.population(
-        strModel=modelObj.strModel, numInd=config['GA']['INDIVIDUALS'],
+    pop_obj = population.population(
+        strModel=model_obj.strModel, numInd=config['GA']['INDIVIDUALS'],
         numGen=config['GA']['GENERATIONS'],
         numModelThreads=config['GA']['THREADS'], recorders=recorders,
-        dbObj=dbObj, starttime=sdt, stoptime=edt,
-        timezone=tz, inPath=modelObj.pathModelIn,
+        dbObj=db_obj, starttime=sdt, stoptime=edt,
+        timezone=tz, inPath=model_obj.pathModelIn,
         outDir='/pyvvo/pyvvo/models',
         reg=model_data['voltage_regulator'], cap=model_data['capacitor'],
         costs=costs, probabilities=config['PROBABILITIES'],
@@ -515,9 +356,12 @@ if __name__ == '__main__':
     log.info('Population object initialized.')
 
     log.info('Starting genetic algorithm...')
-    bestInd = popObj.ga()
+    best_ind = pop_obj.ga()
     log.info('Shutting down genetic algorithm threads...')
-    popObj.stopThreads()
+    pop_obj.stopThreads()
 
-    log.info('Best individual: {}'.format(bestInd))
+    log.info('Best individual: {}'.format(best_ind))
 
+
+if __name__ == '__main__':
+    main()

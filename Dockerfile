@@ -82,4 +82,7 @@ WORKDIR $PYVVO
 COPY pyvvo ./pyvvo
 
 # Use symbolic link to link app configuration.
-# TODO
+RUN ln -s ${PYVVO}/pyvvo/pyvvo.config /appconfig
+
+# Work from the 'app' directory so that pathing "just works"
+WORKDIR ${PYVVO}/pyvvo/app
