@@ -12,12 +12,15 @@ import threading
 import sys
 import copy
 import logging
+import time
 
 # pyvvo
 from individual import individual, CAPSTATUS
 import populationManager
 import helper
 
+# Installed
+import simplejson as json
 
 class population:
 
@@ -177,6 +180,7 @@ class population:
                 Essentially, we'll be seeding this population with 'keep' of 
                 the best individuals.
         """
+        self.log.debug('Starting the "prep" function.')
         # Set times.
         self.starttime = starttime
         self.stoptime = stoptime
@@ -250,6 +254,7 @@ class population:
         
         TODO: Make more flexible.
         """
+        self.log.debug('Starting the "initializePop" function.')
         # Create baseline individual.
         if self.baseControlFlag is not None:
             # Set regFlag and capFlag
@@ -271,7 +276,7 @@ class population:
             self.baselineIndex = len(self.individualsList) - 1
             self.log.debug('Baseline individual created and added to list.')
 
-        # Create 'extreme' indivuals - all caps in/out, regs maxed up/down
+        # Create 'extreme' individuals - all caps in/out, regs maxed up/down
         # Control flag of 0 for manual control
         for n in range(len(CAPSTATUS)):
             for regFlag in range(2):
@@ -308,12 +313,15 @@ class population:
             self.individualsList.append(ind)
         self.log.debug("Random individuals created.")
 
-        self.log.info('Population initialized.')
+        self.log.info('Population of {} individuals initialized.'.format(
+            len(self.individualsList)))
 
     def ga(self):
         """Main function to run the genetic algorithm.
         """
         g = 0
+        t0 = time.time()
+        model_count = len(self.individualsList)
         # Put all individuals in the queue for processing.
         for ind in self.individualsList:
             self.modelQueue.put_nowait({'individual': ind,
@@ -325,8 +333,9 @@ class population:
         while g < self.numGen:
             # Wait until all models have been run and evaluated.
             self.modelQueue.join()
-            self.log.info(('All model runs are complete for generation {'
-                           '}.').format(g + 1))
+            t1 = time.time()
+            self.log.info(('{} model runs complete in {:.0f} seconds for '
+                           'generation {}.').format(model_count, t1-t0, g+1))
 
             # If this is the first generation and we're tracking a baseline, 
             # save the requisite information.
@@ -345,7 +354,8 @@ class population:
                                          reg=self.baselineData['reg'],
                                          cap=self.baselineData['cap'])
                 self.log.debug('Baseline individual data assigned.')
-                self.log.info('Baseline costs: {:.2f}'.format(bInd.costs))
+                self.log.info('Baseline costs: {:.2f}'.format(
+                    json.dumps(bInd.costs, indent=4)))
 
             # Sort the individualsList by score.
             self.individualsList.sort(key=lambda x: x.costs['total'])
@@ -372,7 +382,8 @@ class population:
 
                 # Replenish the population by crossing and mutating individuals
                 # then run their models.
-                self.crossMutateRun()
+                t0 = time.time()
+                model_count = self.crossMutateRun()
                 msg = 'Cross and mutate complete for generation {}.'.format(g)
                 self.log.info(msg)
                 msg + (' All models should now be running for generation {'
@@ -444,6 +455,7 @@ class population:
         """Crosses traits from surviving individuals to regenerate population,
             then runs the new individuals to evaluate their cost.
         """
+        count = 0
         # Loop until population has been replenished.
         # Extract the number of individuals.
         n = len(self.individualsList)
@@ -533,8 +545,11 @@ class population:
                 # Put individual in the list and the queue.
                 self.individualsList.append(ind)
                 self.addToModelQueue(individual=ind)
+                count += 1
                 self.log.debug(('Individual {} put in the model '
                                 + 'queue.').format(uid))
+
+        return count
 
         """
         # Sort the chooseCount by number of occurences

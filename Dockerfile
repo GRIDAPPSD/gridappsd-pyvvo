@@ -77,6 +77,9 @@ RUN perl -E "print '*' x 80" \
     && apt-get purge -y --auto-remove ${PACKAGES} \
     && apt-get -y clean
 
+# DEVELOPMENT ONLY: Install nano so we can look at file dumps.
+RUN apt-get install -y nano
+
 # Copy application code.
 WORKDIR $PYVVO
 COPY pyvvo ./pyvvo

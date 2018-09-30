@@ -21,7 +21,33 @@ SECOND_EXP = re.compile(r'[+-]*([0-9])+(\.)*([0-9])*(e[+-]*([0-9])+)*[dr]')
 # Weekday and weekend bounds, inclusive
 WEEKDAY = (0, 4)
 WEEKEND = (5, 6)
-   
+
+
+def reg_tap_cim_to_gld(step, step_voltage_increment):
+    """
+
+    :param step: CIM setting of voltage regulator, which is a
+                    multiplier of nominal voltage, e.g. 1.0125.
+
+    :param step_voltage_increment: voltage step as multiplier of nominal
+                                   voltage, e.g. 0.625
+
+    :return: tap position in GridLAB-D speak, e.g. 10 or -2
+    """
+
+    return round((step - 1) * 100 / step_voltage_increment)
+
+
+def reg_tap_gld_to_cim(tap_pos, step_voltage_increment, ndigits=4):
+    """
+
+    :param tap_pos:
+    :param step_voltage_increment:
+    :return:
+    """
+
+    return round(tap_pos * step_voltage_increment / 100 + 1, ndigits)
+
 def getComplex(s):
     """Function to take a string which represents a complex number and convert
     it into a Python complex type. This is specifically intended to work with
@@ -402,7 +428,7 @@ def getSummaryStr(costs, reg, cap, regChrom=None, capChrom=None, parents=None):
     """
     s = ''
     if costs:
-        s += json.dumps(costs) + '\n'
+        s += json.dumps(costs, indent=4) + '\n'
     
     # Add parents.
     if parents:

@@ -1,7 +1,7 @@
 """Collection of sparql queries for use by pyvvo."""
 from collections import OrderedDict
 
-from helper import binaryWidth
+import helper
 from constants import LOADS, NOMVFACTOR
 
 # Define query prefix
@@ -19,7 +19,7 @@ REGULATOR_QUERY = \
      "?highStep ?lowStep ?neutralStep ?normalStep ?neutralU ?step "
      "?initDelay ?subDelay ?ltc ?vlim ?vset ?vbw ?ldc ?fwdR ?fwdX "
      "?revR ?revX ?discrete ?ctl_enabled ?ctlmode ?monphs "
-     "?ctRating ?ctRatio ?ptRatio ?id ?fdrid "
+     "?ctRating ?ctRatio ?ptRatio ?id ?fdrid ?rtcid ?endid "
      "WHERE {{ "
      'VALUES ?fdrid {{"{fdrid}"}} '
      "?pxf c:Equipment.EquipmentContainer ?fdr. "
@@ -28,6 +28,7 @@ REGULATOR_QUERY = \
      "?rtc c:IdentifiedObject.name ?rname. "
      "?rtc c:RatioTapChanger.TransformerEnd ?end. "
      "?end c:TransformerEnd.endNumber ?wnum. "
+     "?end c:IdentifiedObject.mRID ?endid. "
      "OPTIONAL {{ "
      "?end c:TransformerTankEnd.phases ?phsraw. "
      'bind(strafter(str(?phsraw),"PhaseCode.") as ?phs)'
@@ -41,6 +42,7 @@ REGULATOR_QUERY = \
      "?rtc c:RatioTapChanger.tculControlMode ?moderaw. "
      'bind(strafter(str(?moderaw),"TransformerControlMode.")'
      " as ?mode) "
+     "?rtc c:IdentifiedObject.mRID ?rtcid. "
      "?rtc c:TapChanger.controlEnabled ?enabled. "
      "?rtc c:TapChanger.highStep ?highStep. "
      "?rtc c:TapChanger.initialDelay ?initDelay. "
@@ -241,7 +243,7 @@ def parse_regulator_query(bindings):
         # Compute the number of binary values needed to represent the
         # number of taps.
         num_taps = int(el['highStep']['value']) - int(el['lowStep']['value'])
-        width = binaryWidth(num_taps)
+        width = helper.binaryWidth(num_taps)
 
         # Increment the ending index
         e += width
@@ -273,8 +275,12 @@ def parse_regulator_query(bindings):
         # Compute the nominal tap position for GridLAB-D.
         # TODO: this should probably be obtained from some sort of
         # measurement object.
-        prev_state = round(((float(el['step']['value']) - 1) * 100)
-                           / step_voltage_increment)
+        prev_state = \
+            helper.reg_tap_cim_to_gld(step=float(el['step']['value']),
+                                      step_voltage_increment=step_voltage_increment)
+
+        # prev_state = round(((float(el['step']['value']) - 1) * 100)
+        #                    / step_voltage_increment)
 
         # Set the 'prevState' for this phase.
         try:
@@ -286,7 +292,10 @@ def parse_regulator_query(bindings):
 
         # Build dict for this phase
         reg[name]['phases'][el['phs']['value'].upper()] = \
-            {'prevState': prev_state, 'chromInd': (s, e)}
+            {'prevState': prev_state, 'chromInd': (s, e),
+             'mrid': el['rtcid']['value']}
+             # 'mrid': el['endid']['value']}
+
 
         # Increment the starting index
         s += width
@@ -348,8 +357,10 @@ def parse_capacitor_query(bindings):
             phases[p] = {'prevState': 'OPEN', 'chromInd': ind}
             ind += 1
 
-        # Build dictionary for this capacitor
-        cap[name] = {'phases': phases, 'id': el['id']['value']}
+        # Build dictionary for this capacitor.
+        # TODO: This id assignment may be incorrect for capacitors that
+        # have multiple phases.
+        cap[name] = {'phases': phases, 'mrid': el['id']['value']}
 
     return cap
 
