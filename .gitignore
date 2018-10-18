@@ -1,3 +1,7 @@
+# .eps and .png image files
+*.eps
+*.png
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -52,7 +52,7 @@ class GOSSListener(object):
                                  base_simulation_status_topic=SIM_LOG)
         self.gossObj.subscribe(SIM_OUT, self)
         
-        # Initialize dictionary for storing simulation data
+        # Initialize dictionary for storing simulation data_ls
         # TODO: we probably shouldn't stack this up in memory... recipe for 
         # disaster.
         self.data = {}
@@ -73,7 +73,7 @@ class GOSSListener(object):
             self.data[t] = {}
         else:
             # This key already exists? We're in trouble...
-            raise UserWarning("We already have data for time {}".format)
+            raise UserWarning("We already have data_ls for time {}".format)
         
         # Get the simulation output as a dictionary.
         # May need to wrap this in a try-catch, TBD
@@ -95,7 +95,7 @@ if __name__ == '__main__':
         print('Incremented time, sending to FNCS.')
         obj.gossObj.send("goss.gridappsd.fncs.input", json.dumps(msg))
         
-    # Let's inspect the the object's data dictionary.
+    # Let's inspect the the object's data_ls dictionary.
     print('Do it!')
     
     # Just wait...

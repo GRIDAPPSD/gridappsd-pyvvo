@@ -52,7 +52,7 @@ class sparqlCIM:
         # VALUES ?fdrid {"_9CE150A8-8CC5-A0F9-B67E-BBD8C79D3095"}  # R2 12.47 3
     
         # Build the regulator query.
-        # TODO: clean up query so it is only pulling the data we care about.
+        # TODO: clean up query so it is only pulling the data_ls we care about.
         regQ = (PREFIX + 
                 "SELECT ?rname ?pname ?tname ?wnum ?phs ?incr ?mode ?enabled "
                 "?highStep ?lowStep ?neutralStep ?normalStep ?neutralU ?step "

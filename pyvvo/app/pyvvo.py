@@ -68,7 +68,7 @@ def main():
     log = setupLog(logConfig=config['LOG'])
     log.info('Configuration file read, log configured.')
     
-    # Get sparqlCIM object, get regulator and capacitor data.
+    # Get sparqlCIM object, get regulator and capacitor data_ls.
     sparqlObj = sparqlCIM.sparqlCIM(**config['BLAZEGRAPH'])
     reg = sparqlObj.getRegs(fdrid=config['FEEDER']['ID'])
     cap = sparqlObj.getCaps(fdrid=config['FEEDER']['ID'])
@@ -77,11 +77,11 @@ def main():
     # Get dictionary of loads and their nominal voltages
     loadV = sparqlObj.getLoadNomV(fdrid=config['FEEDER']['ID'])
     swingV = sparqlObj.getSwingVoltage(fdrid=config['FEEDER']['ID'])
-    log.info('Load and swing bus nominal voltage data pulled from blazegraph.')
+    log.info('Load and swing bus nominal voltage data_ls pulled from blazegraph.')
     
     # Get dictionary of load measurements
     loadM = sparqlObj.getLoadMeasurements(fdrid=config['FEEDER']['ID'])
-    log.info('Load measurement data pulled from blazegraph.')
+    log.info('Load measurement data_ls pulled from blazegraph.')
     
     # Ensure we have a measurement for all loads.
     # TODO: Eventually we should have a way to handle unmeasured loads.

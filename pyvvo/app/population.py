@@ -343,7 +343,7 @@ class population:
                     helper.getSummaryStr(costs=self.baselineData['costs'],
                                               reg=self.baselineData['reg'],
                                               cap=self.baselineData['cap'])
-                self.log.debug('Baseline individual data assigned.')
+                self.log.debug('Baseline individual data_ls assigned.')
             
             # Sort the individualsList by score.
             self.individualsList.sort(key=lambda x: x.costs['total'])

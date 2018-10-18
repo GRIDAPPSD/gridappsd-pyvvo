@@ -722,7 +722,7 @@ class modGLM:
             propList: list of properties to record. Ex: ['power_A',
                 'power_B', 'power_C']
             interval: interval in seconds to record
-            header_fieldnames: Specifies the header data to store in each
+            header_fieldnames: Specifies the header data_ls to store in each
                 record inserted. Valid fieldnames are "name", "class",
                 "latitude", and "longitude"
             options: PURGE|UNITS - PURGE drops and recreates table on init.
@@ -1423,7 +1423,7 @@ class modGLM:
                 # Initialize property dictionary
                 propDict = {}
                 
-                # Loop over the rest of the data and add to dictionary
+                # Loop over the rest of the data_ls and add to dictionary
                 for ind in range(1, len(headers)):
                     propDict[(headers[ind].lstrip() + phase)] = \
                         row[ind].lstrip()
@@ -1443,6 +1443,32 @@ class modGLM:
                 
                 # Splice in the new object
                 self.replaceObject(objDict=tObj)
+
+    def update_zip_from_dict(self, name, zip_dict):
+        """Given a dictionary of ZIP coefficients, update a ZIP load.
+
+        INPUTS:
+            name: string, name of ZIP load object.
+            zip_dict: dictionary with all the ZIP load properties to update.
+
+        OUTPUT:
+            None: model will be updated in place.
+        """
+        # Extract the triplex_meter object by name
+        t_obj = self.extractObjectByNameAndType(name=name,
+                                                objRegEx=TRIPLEX_LOAD_OR_METER)
+
+        # Replace the object's type - should be a triplex_load rather than
+        # triplex_meter.
+        t_obj['obj'] = re.sub(TRIPLEX_METER_REGEX, 'object triplex_load',
+                              t_obj['obj'])
+
+        # Add the ZIP properties
+        t_obj['obj'] = self.modObjProps(objStr=t_obj['obj'], propDict=zip_dict)
+
+        # Splice in the new object
+        self.replaceObject(objDict=t_obj)
+
         
     def checkForModule(self, module):
         """Simple function to check if a module is in a model. Returns None if
@@ -1505,8 +1531,4 @@ class UnexpectedSwingType(Error):
         return(repr(self.message))
     
 if __name__ == '__main__':
-    obj = modGLM(pathModelIn='E:/pmaps/experiment/R2_12_47_2/R2_12_47_2_populated.glm')
-    s = '2013-02-01 01:00:00'
-    e = '2013-02-01 02:00:00'
-    zipDir = 'E:/pmaps/experiment/zip'
-    obj.addZIP(zipDir=zipDir, starttime=s, stoptime=e)
+    pass

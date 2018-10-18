@@ -431,10 +431,10 @@ def findBestClusterFit(data, cluster_selection_data, minClusterSize=4, Vn=240,
     """
     
     INPUTS:
-    data: pandas DataFrame containing the data to be used for clustering.
-    cluster_selection_data: pandas Series containing data for selecting a
+    data_ls: pandas DataFrame containing the data_ls to be used for clustering.
+    cluster_selection_data: pandas Series containing data_ls for selecting a
         cluster
-    minClusterSize: integer defining the smallest number of data points allowed
+    minClusterSize: integer defining the smallest number of data_ls points allowed
         in a cluster that will be used to perform a ZIP fit.
     Vn: nominal voltage 
     solver: solver (in SOLVERS) to use
@@ -442,7 +442,7 @@ def findBestClusterFit(data, cluster_selection_data, minClusterSize=4, Vn=240,
     poly: polynomial to use for starting conditions for the ZIP fit.
 
     NOTE: Only columns from cluster_selection_data are used for cluster
-        selection. However, all columns in 'data' are used for fitting.
+        selection. However, all columns in 'data_ls' are used for fitting.
     """
     # Compute maximum possible clusters.
     n = np.floor(data.shape[0] / minClusterSize).astype(int)
@@ -450,7 +450,7 @@ def findBestClusterFit(data, cluster_selection_data, minClusterSize=4, Vn=240,
     # Get reference to cluster selection columns.
     cluster_match_cols = cluster_selection_data.index
 
-    # Normalize 'data.'
+    # Normalize 'data_ls.'
     d_norm = featureScale(x=data)
 
     # Normalize cluster_selection_data for finding the right cluster.
@@ -488,12 +488,12 @@ def findBestClusterFit(data, cluster_selection_data, minClusterSize=4, Vn=240,
         # to access the set of K Means "labels" to use.
         best_label = square_distance.idxmin()
 
-        # If this cluster doesn't have enough data in it, move along.
+        # If this cluster doesn't have enough data_ls in it, move along.
         label_match = km.labels_ == best_label
         if np.count_nonzero(label_match) < minClusterSize:
             continue
 
-        # Extract data to perform fit. ZIP fit only uses P, Q, and V.
+        # Extract data_ls to perform fit. ZIP fit only uses P, Q, and V.
         fit_data = data.loc[label_match, ['P', 'Q', 'V']]
 
         # Perform and evaluate ZIP fit.
@@ -551,17 +551,17 @@ def fitForNode(dataIn, randomState=None):
         REQUIRED FIELDS:
         table: table in database to use.
         node: name of node to pull from database.
-        node_data: pandas DataFrame with data for this node. Data should come
+        node_data: pandas DataFrame with data_ls for this node. Data should come
             from call to db.getTPQVForNode
         starttime: aware datetime indicating inclusive left time bound.
         stoptime: aware datetime indicating inclusive right time bound.
-        cluster: boolean flag. If True, data will be clustered and a ZIP
+        cluster: boolean flag. If True, data_ls will be clustered and a ZIP
             fit will be computed for the appropriate cluster. If False,
-            all the data (after being filtered by interval_filter) is used in
+            all the data_ls (after being filtered by interval_filter) is used in
             the ZIP fit.
         mode: 'test' or 'predict.' In 'predict' mode, P, Q, and V are not
             known for the next timestep. In 'test' mode, they are.
-        interval_filter: boolean array used to filter data obtained from the
+        interval_filter: boolean array used to filter data_ls obtained from the
             database.
         Vn: nominal voltage for the given node.
         solver: solver to use for performing the ZIP fit. Should be in
@@ -572,7 +572,7 @@ def fitForNode(dataIn, randomState=None):
         OPTIONAL/DEPENDENT FIELDS:
 
         this_time_filter: Required if 'cluster' is True. Used to filter node
-            data by the time we're trying to predict for choosing a cluster
+            data_ls by the time we're trying to predict for choosing a cluster
         pq_avg: boolean. If True, 'node_data' will be filtered by
             'this_time_filter,' and the average P and Q will be used in cluster
             selection. Only used if 'cluster' is True.
@@ -581,7 +581,7 @@ def fitForNode(dataIn, randomState=None):
         solar_flux_forecast: "" solar_flux ""
         climateData: pandas DataFrame, indexed by time. Columns are
             'temperature' and 'solar_flux.' Only used if 'cluster' is True.
-        minClusterSize: minimum number of data points a cluster must have in
+        minClusterSize: minimum number of data_ls points a cluster must have in
             order to be used for fitting. Only used if 'cluster' is True.
             
     randomState: numpy random.RandomState object or None. Used in clustering.
@@ -600,20 +600,20 @@ def fitForNode(dataIn, randomState=None):
         P_estimate = Prediction (estimate) of P given V and ZIP coefficients
         Q_estimate = "" of Q ""
     """
-    # Ensure our filter matches our data.
+    # Ensure our filter matches our data_ls.
     if len(dataIn['interval_filter']) != dataIn['node_data'].shape[0]:
         raise ValueError('Given bad time filter or start/stop times!')
 
-    # Filter data by time.
+    # Filter data_ls by time.
     d = dataIn['node_data'].loc[dataIn['interval_filter'], :]
 
     # Initialize return.
     out_dict = {'node': dataIn['node']}
 
-    # In 'test' mode, the last row of data is assumed to be the real data
+    # In 'test' mode, the last row of data_ls is assumed to be the real data_ls
     # for the period which we're testing - it should be dropped.
     if dataIn['mode'] == 'test':
-        # Grab the data for which we're trying to predict (last row).
+        # Grab the data_ls for which we're trying to predict (last row).
         test_data = d.iloc[-1]
 
         # Drop it from the DataFrame so we don't include it in our fitting.
@@ -633,10 +633,10 @@ def fitForNode(dataIn, randomState=None):
         cluster_data = d.drop(labels='V', axis=1)
         '''
 
-        # Get filter for climate data.
+        # Get filter for climate data_ls.
         climate_filter = dataIn['interval_filter']
 
-        # Initialize pandas Series for the data we'll use to select a cluster.
+        # Initialize pandas Series for the data_ls we'll use to select a cluster.
         cluster_selection_data = \
             dataIn['climateData'].iloc[-1][['temperature', 'solar_flux']]
 
@@ -645,7 +645,7 @@ def fitForNode(dataIn, randomState=None):
         p_q_filter = dataIn['this_time_filter']
 
         # In 'test' mode, we need to ensure we're not cheating and avoid using
-        # the last data row in our clustering + fitting.
+        # the last data_ls row in our clustering + fitting.
         if dataIn['mode'] == 'test':
             # Ensure the last climate value isn't used.
             climate_filter[-1] = False
@@ -653,7 +653,7 @@ def fitForNode(dataIn, randomState=None):
             # cluster selection.
             p_q_filter[-1] = False
         else:
-            # We're in 'predict' mode. Use forecast data if available.
+            # We're in 'predict' mode. Use forecast data_ls if available.
             for f in ['temperature', 'solar_flux']:
                 try:
                     # Use the forecasted value.
@@ -662,10 +662,10 @@ def fitForNode(dataIn, randomState=None):
                     # Not given a forecast, use last available value.
                     pass
 
-        # Filter climate data by the climate_filter.
+        # Filter climate data_ls by the climate_filter.
         climate_data_interval = dataIn['climateData'][climate_filter]
 
-        # Associate climate data with node data.
+        # Associate climate data_ls with node data_ls.
         cluster_data = d.merge(climate_data_interval, how='outer', on='T')
 
         # Compute mean P and Q for the prediction time, using p_q_filter.
@@ -718,7 +718,7 @@ def fitForNodeWorker(inQ, outQ, randomSeed=None):
         parallelization.
     
     INPUTS:
-        inQ: multiprocessing JoinableQueue which will be have data needed to
+        inQ: multiprocessing JoinableQueue which will be have data_ls needed to
             perform the fit inserted into it. Each item will be a dictionary.
             See comments for the 'dataIn' input to the 'fitForNode' function to
             see all the fields.
@@ -737,7 +737,7 @@ def fitForNodeWorker(inQ, outQ, randomSeed=None):
 
     # Enter loop which continues until signal received to terminate.
     while True:
-        # Pull data out of the input queue.
+        # Pull data_ls out of the input queue.
         data_in = inQ.get()
 
         # None will signal termination of the process.
@@ -761,7 +761,7 @@ def fitForNodeWorker(inQ, outQ, randomSeed=None):
 
         finally:
 
-            # Always put data in the output queue.
+            # Always put data_ls in the output queue.
             outQ.put(fit_data)
 
             # Always mark the task as done so the program doesn't hang while
@@ -834,10 +834,10 @@ def get_time_filters(clockObj, datetimeIndex, interval, numInterval=2,
 
 
 def database_worker(db_obj, thread_queue, process_queue):
-    """Function for threads to get node data from the database.
+    """Function for threads to get node data_ls from the database.
     """
     while True:
-        # Grab data from the thread_queue.
+        # Grab data_ls from the thread_queue.
         data_in = thread_queue.get()
 
         # None will signal termination of the thread.
@@ -847,7 +847,7 @@ def database_worker(db_obj, thread_queue, process_queue):
         # Time database access.
         t0 = process_time()
 
-        # Get data for this node from the database.
+        # Get data_ls for this node from the database.
         data_in['node_data'] = \
             db_obj.getTPQVForNode(table=data_in['table'], node=data_in['node'],
                                   starttime=data_in['starttime'],
@@ -909,8 +909,8 @@ def get_and_start_threads(num_threads, db_obj, thread_queue,
     num_threads: number of threads to use.
     db_obj: db.db object. NOTE: it's pool size should be >= to num_threads
         in order for multi-threaded database access to be effective.
-    thread_queue: threading Queue for passing data in to the thread.
-    process_in_queue: multiprocessing JoinableQueue for passing data to
+    thread_queue: threading Queue for passing data_ls in to the thread.
+    process_in_queue: multiprocessing JoinableQueue for passing data_ls to
         Processes
     """
     # Generate keyword arguments for the database_worker function
@@ -941,8 +941,8 @@ if __name__ == '__main__':
     # Times for performing fitting.
     #st = '2016-11-06 00:45:00'
     #et = '2016-11-06 02:15:00'
-    st = '2016-01-01 00:00:00'
-    et = '2016-01-01 01:00:00'
+    st = '2016-06-08 00:00:00'
+    et = '2016-06-08 01:00:00'
     #st = '2016-02-01 00:00:00'
     #et = '2016-08-01 00:00:00'
     # timezone
@@ -951,11 +951,11 @@ if __name__ == '__main__':
     # Set random seed.
     seed = 42
 
-    # Define our data interval (15 minutes).
+    # Define our data_ls interval (15 minutes).
     intervalMinute = 15
     intervalSecond = intervalMinute * 60
 
-    # Use a two week window for grabbing historic data
+    # Use a two week window for grabbing historic data_ls
     window = 60 * 60 * 24 * 7 * 2
 
     # Initialize a clock object for "training" datetimes.
@@ -970,7 +970,7 @@ if __name__ == '__main__':
     # solver='fmin_powell'
     solver = 'SLSQP'
 
-    # Table data is in
+    # Table data_ls is in
     table = 'r2_12_47_2_ami_triplex_15_min'
     climateTable = 'r2_12_47_2_ami_climate_1_min'
     # Node name
@@ -997,13 +997,13 @@ if __name__ == '__main__':
              'tpm0_R2-12-47-2_tm_6_R2-12-47-2_tn_198']
     '''
 
-    # Initialize some data frames for holding results.
+    # Initialize some data_ls frames for holding results.
     outDf = pd.DataFrame
 
     # Hard-code output names
     outDfName = 'cluster' + '_' + solver
 
-    # We'll use threads to pull node data to feed the processes.
+    # We'll use threads to pull node data_ls to feed the processes.
     THREADS = 8
     print('Using {} threads for database access'.format(THREADS))
 
@@ -1020,7 +1020,7 @@ if __name__ == '__main__':
     thread_queue = Queue()
 
     # Initialize queues for processes. We'll limit it's size so we don't pull
-    # in too much data and blow up our memory needs. For now, we're working
+    # in too much data_ls and blow up our memory needs. For now, we're working
     # with only 16 nodes, so we'll hard-code cap it there.
     process_in_queue = mp.JoinableQueue(maxsize=16)
     process_out_queue = mp.Queue()
@@ -1054,7 +1054,7 @@ if __name__ == '__main__':
         clockStart, clockStop = clockObj.getStartStop()
         start_str = clockObj.times['start']['str']
 
-        # Get the climate data for window up to start time. This will include
+        # Get the climate data_ls for window up to start time. This will include
         # present conditions for testing purposes.
         climateData = db_obj.getTempAndFlux(table=climateTable,
                                             starttime=windowStart,
@@ -1095,13 +1095,13 @@ if __name__ == '__main__':
         # Wait for multiprocessing work to finish.
         process_in_queue.join()
 
-        # Initialize list for dumping queue data to.
+        # Initialize list for dumping queue data_ls to.
         qList = []
 
-        # Get data out of the output queue and into the output DataFrame.
+        # Get data_ls out of the output queue and into the output DataFrame.
         while True:
             try:
-                # Grab data from the queue.
+                # Grab data_ls from the queue.
                 thisData = process_out_queue.get(block=True, timeout=1)
             except Empty:
                 # Note that queue.Empty exceptions are raised for both timeouts
@@ -1112,7 +1112,7 @@ if __name__ == '__main__':
                     s = '{}: Queue timeout! Which is weird.'.format(start_str)
                     log.write(s)
 
-                # Queue is empty, so we have all the data.
+                # Queue is empty, so we have all the data_ls.
                 break
 
             # Queue isn't empty.
@@ -1121,7 +1121,7 @@ if __name__ == '__main__':
             # way.
             if type(thisData) is str:
                 # Make a simple dictionary and put it in the list. Pandas is
-                # smart enough to null out all the other data.
+                # smart enough to null out all the other data_ls.
                 qList.append({'node': thisData, 'T': clockStart})
 
                 # Log it.
