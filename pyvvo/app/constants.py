@@ -20,7 +20,8 @@ TZ = {'EST5EDT':    dateutil.tz.gettz('US/Eastern'),
       'MST7MDT':    dateutil.tz.gettz('US/Mountain'),
       'PST8PDT':    dateutil.tz.gettz('US/Pacific'),
       'AST9ADT':    dateutil.tz.gettz('US/Alaska'),
-      'HST10HDT':   dateutil.tz.gettz('US/Hawaii')}
+      'HST10HDT':   dateutil.tz.gettz('US/Hawaii'),
+      'UTC0' :      dateutil.tz.gettz('UTC')}
 
 # Create regular expression for checking for timezone strings
 TZ_EXP = re.compile('[ECMPAH][SD]T')

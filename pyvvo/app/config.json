@@ -25,17 +25,18 @@
   },
   "INTERVALS": {
 	"SAMPLE": 60,
-	"OPTIMIZATION": 3600
+	"OPTIMIZATION": 900
   },
   "GLD-INSTALLATION": {
-    "DIR": "C:/gridlab-d/builds/feature/1095",
+    "DIR": "/pyvvo",
     "LD_LIBRARY_PATH": "/usr/local/mysql/lib"
   },
   "GLD-DB": {
     "database": "pyvvo",
     "user": "pyvvo",
     "password": "pyvvo",
-    "host": "localhost"
+    "host": "localhost",
+    "port": 3306
   },
   "GLD-DB-OTHER": {
 	"NUM-CONNECTIONS": 20,
@@ -60,14 +61,15 @@
     "regMutate": 0.05
   },
   "GA": {
-	"THREADS": 8,
-	"INDIVIDUALS": 16,
-	"GENERATIONS": 2
+	"THREADS": 10,
+	"INDIVIDUALS": 30,
+	"GENERATIONS": 3
   },
   "LOG": {
-	"FILE": "C:/Users/thay838/git_repos/gridappsd-pyvvo/pyvvo/tests/log.txt",
-	"LEVEL": "DEBUG",
-	"FORMAT": "[%(asctime)s] [thread %(thread)d] [%(module)s] [%(levelname)s]: %(message)s",
+	"FILE": "",
+	"LEVEL": "INFO",
+	"FORMAT": "[%(asctime)s] [%(module)s:%(funcName)s:%(lineno)d] [%(levelname)s]: %(message)s",
+    "DATE_FMT": "%H:%M:%S",
 	"MODE": "w"
   }
 }

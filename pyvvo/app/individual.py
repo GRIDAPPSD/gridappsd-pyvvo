@@ -558,12 +558,20 @@ class individual:
                     
                 # Convert the binary to an integer
                 posInt = helper.bin2int(tapBin)
+
+                # Get the tap position.
+                tap = gld.translateTaps(lowerTaps=self.reg[r]['lower_taps'],
+                                        pos=posInt)
+
+                # Fix the tap position if it's out of bounds.
+                if tap < -self.reg[r]['lower_taps']:
+                    tap = -self.reg[r]['lower_taps']
+                elif tap > self.reg[r]['raise_taps']:
+                    tap = self.reg[r]['raise_taps']
                 
                 # Convert integer to tap position and assign to new position
-                self.reg[r]['phases'][phase]['newState'] = \
-                    gld.translateTaps(lowerTaps=self.reg[r]['lower_taps'],
-                                      pos=posInt)
-                    
+                self.reg[r]['phases'][phase]['newState'] = tap
+
                 # Increment the tap change counter (previous pos - this pos)
                 self.tapChangeCount += \
                     abs(self.reg[r]['phases'][phase]['prevState']
