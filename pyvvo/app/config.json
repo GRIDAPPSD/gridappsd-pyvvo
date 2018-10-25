@@ -61,9 +61,9 @@
     "regMutate": 0.05
   },
   "GA": {
-	"THREADS": 10,
-	"INDIVIDUALS": 20,
-	"GENERATIONS": 3
+	"THREADS": 7,
+	"INDIVIDUALS": 7,
+	"GENERATIONS": 2
   },
   "LOG": {
 	"FILE": "",
