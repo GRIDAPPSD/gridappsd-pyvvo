@@ -11,8 +11,8 @@ from gridappsd import GridAPPSD, topics, utils, difference_builder
 # Standard library
 import logging
 import argparse
+import sys
 import time
-import pprint
 
 # Installed
 import simplejson as json
@@ -25,7 +25,9 @@ import constants as CONST
 import db
 import helper
 import population
+import individual
 
+import re
 
 # Logging.
 # logging.basicConfig(level=logging.INFO)
@@ -294,12 +296,12 @@ def command_capacitors(log, sim_id, cap_dict, gridappsd_object, sim_in_topic):
 
             # Only command regulators if we need to.
             if phase_dict['newState'] != phase_dict['prevState']:
-                # TODO: Fix this difference, should be 0 or 1, not open or
-                # closed.
+                new_pos = individual.CAPSTATUS.index(phase_dict['newState'])
+                old_pos = individual.CAPSTATUS.index(phase_dict['prevState'])
                 diff_builder.add_difference(
-                    object_id=cap['mrid'], attribute='TapChanger.step',
-                    forward_value=phase_dict['newState'],
-                    reverse_value=phase_dict['prevState'])
+                    object_id=cap['mrid'],
+                    attribute='ShuntCompensator.sections',
+                    forward_value=new_pos, reverse_value=old_pos)
 
         if len(diff_builder._forward) > 0:
             msg = diff_builder.get_message()
@@ -308,29 +310,11 @@ def command_capacitors(log, sim_id, cap_dict, gridappsd_object, sim_in_topic):
             gridappsd_object.send(topic=sim_in_topic, message=json.dumps(msg))
             log.info('Capacitor command for {} sent.'.format(cap_name))
         else:
-            log.debug('No command necessary for capacitor {}'.format(cap_name))
+            log.info('No command necessary for capacitor {}'.format(cap_name))
 
 
-def main(log, sim_id, model_id, gridappsd_address, sim_in_topic,
+def main(log, config, sim_id, model_id, gridappsd_address, sim_in_topic,
          sim_out_topic=None):
-
-    # For development, hard-code this machine's internal IP.
-    # MYSQL_HOST = '192.168.0.33'
-    # In docker-compose, use the service name.
-    MYSQL_HOST = 'mysql-pyvvo'
-
-    # When running inside the platform, use standard MySQL port.
-    MYSQL_PORT = 3306
-
-    # MYSQL_PORT is different when running outside the platform.
-    # MYSQL_PORT = 3307
-
-    # Override the MySQL host and port.
-    config['GLD-DB']['host'] = MYSQL_HOST
-    config['GLD-DB']['port'] = MYSQL_PORT
-
-    if gridappsd_address is None:
-        gridappsd_address = utils.get_gridappsd_address()
 
     # Initialize GridAPPSD object from within the platform.
     gridappsd_object = GridAPPSD(simulation_id=sim_id,
@@ -341,18 +325,6 @@ def main(log, sim_id, model_id, gridappsd_address, sim_in_topic,
     # if sim_out_topic is not None:
     #     dump_output = DumpOutput()
     #     gridappsd_object.subscribe(topic=sim_out_topic, callback=dump_output)
-
-    # Initialize GridAPPSD object when outside the platform.
-    # gridappsd_object = GridAPPSD(address=('192.168.0.33', 61613))
-
-    if model_id is None:
-        # We'll be using the 8500 node feeder.
-        model_name = 'ieee8500'
-
-        # Get ID for feeder.
-        model_id = get_model_id(gridappsd_object=gridappsd_object,
-                                model_name=model_name, log=log)
-        log.info('Retrieved model ID for {}.'.format(model_name))
 
     # Get all relevant model data.
     model_data = get_all_model_data(gridappsd_object, model_id, log=log)
@@ -366,9 +338,13 @@ def main(log, sim_id, model_id, gridappsd_address, sim_in_topic,
                                               timeout=30)
     log.info('GridLAB-D model for GA use received.')
 
-    # HARD-CODE remove the json remnants from the message.
-    gld_model['message'] = gld_model['message'][8:-43]
-    log.warn('Bad json for GridLAB-D model fixed via hard-code.')
+    # Remove the json remnants from the message via regular expressions.
+
+    gld_model['message'] = re.sub('^\s*\{\s*"data"\s*:\s*', '',
+                                  gld_model['message'])
+    gld_model['message'] = re.sub('\s*,\s*"responseComplete".+$', '',
+                                  gld_model['message'])
+    log.warn('Bad json for GridLAB-D model fixed via regular expressions.')
 
     # Get a modGLM model to modify the base model.
     model_obj = modGLM.modGLM(strModel=gld_model['message'],
@@ -425,58 +401,6 @@ def main(log, sim_id, model_id, gridappsd_address, sim_in_topic,
                             tzStr=tz)
     log.info('Clock object initialized')
 
-    '''
-    # Get a difference builder for sending commands.
-    diff_builder = difference_builder.DifferenceBuilder(sim_id)
-
-    # Command a capacitor
-    id = model_data['capacitor']['cap_capbank3a']['mrid']
-    diff_builder.add_difference(object_id=id,
-                                attribute='ShuntCompensator.sections',
-                                forward_value=1, reverse_value=0)
-    msg = diff_builder.get_message()
-    log.info('Capacitor command message constructed:\n{}.'.format(
-        json.dumps(msg, indent=4)))
-    gridappsd_object.send(topic=sim_in_topic, message=json.dumps(msg))
-    log.info('Capacitor message sent.')
-
-    # Get a difference builder for sending commands.
-    diff_builder = difference_builder.DifferenceBuilder(sim_id)
-
-    # Let's command a regulator.
-    id = model_data['voltage_regulator']['reg_FEEDER_REG']['phases']['A'][
-        'mrid']
-    v_incr = model_data['voltage_regulator']['reg_FEEDER_REG'][
-        'stepVoltageIncrement']
-    old_pos = model_data['voltage_regulator']['reg_FEEDER_REG']['phases']['A'][
-        'prevState']
-    new_pos = 10
-    old_step = helper.reg_tap_gld_to_cim(old_pos, v_incr)
-    new_step = helper.reg_tap_gld_to_cim(new_pos, v_incr)
-    # diff_builder.add_difference(object_id=id,
-    #                             attribute='RegulatingControl.mode',
-    #                             reverse_value=4,
-    #                             forward_value=4)
-    # diff_builder.add_difference(object_id=id,
-    #                             attribute='TapChanger.step',
-    #                             forward_value=new_pos,
-    #                             reverse_value=old_pos)
-    #
-    # msg = diff_builder.get_message()
-    # log.info('Regulator command message constructed:\n{}.'.format(
-    #     json.dumps(msg, indent=4)))
-    # gridappsd_object.send(topic=sim_in_topic, message=json.dumps(msg))
-    # log.info('Regulator command sent.')
-    # log.info('Regulator command response:\n{}.'.format(json.dumps(response,
-    #                                                               indent=4)))
-
-    while True:
-        time.sleep(10)
-
-    # TODO: now, how do we check that it worked? Is it logged in simulation
-    # output somehow?
-    '''
-
     # Connect to the MySQL database for GridLAB-D simulations
     db_obj = db.db(**config['GLD-DB'],
                    pool_size=config['GLD-DB-OTHER']['NUM-CONNECTIONS'])
@@ -503,8 +427,7 @@ def main(log, sim_id, model_id, gridappsd_address, sim_in_topic,
         costs=costs, probabilities=config['PROBABILITIES'],
         gldInstall=config['GLD-INSTALLATION'],
         randomSeed=config['RANDOM-SEED'],
-        log=log)
-        # , baseControlFlag=0)
+        log=log, baseControlFlag=0)
 
     log.info('Population object initialized.')
 
@@ -513,19 +436,28 @@ def main(log, sim_id, model_id, gridappsd_address, sim_in_topic,
     log.info('Shutting down genetic algorithm threads...')
     pop_obj.stopThreads()
 
+    log.info('Baseline costs:\n{}'.format(json.dumps(
+        pop_obj.baselineData['costs'], indent=4)))
     log.info('Best individual:\n{}'.format(best_ind))
 
     # Send commands.
-    command_capacitors(log=log, sim_id=sim_id, cap_dict=best_ind.cap,
-                       gridappsd_object=gridappsd_object,
-                       sim_in_topic=sim_in_topic)
+    if sim_in_topic is not None:
+        command_capacitors(log=log, sim_id=sim_id, cap_dict=best_ind.cap,
+                           gridappsd_object=gridappsd_object,
+                           sim_in_topic=sim_in_topic)
 
-    command_regulators(log=log, sim_id=sim_id, reg_dict=best_ind.reg,
-                       gridappsd_object=gridappsd_object,
-                       sim_in_topic=sim_in_topic)
+        log.warning('Sleeping 5 seconds before commanding regulators.')
+        time.sleep(5)
+
+        command_regulators(log=log, sim_id=sim_id, reg_dict=best_ind.reg,
+                           gridappsd_object=gridappsd_object,
+                           sim_in_topic=sim_in_topic)
 
 
 if __name__ == '__main__':
+    # Switch for app being managed by platform vs running outside of it.
+    IN_PLATFORM = True
+
     # Read configuration file.
     config = read_config('config.json')
 
@@ -533,37 +465,79 @@ if __name__ == '__main__':
     log = setup_log(config['LOG'])
     log.info('Log configured.')
 
-    # Initialize argument parser.
-    parser = argparse.ArgumentParser()
+    if IN_PLATFORM:
+        # In docker-compose, use the service name.
+        MYSQL_HOST = 'mysql-pyvvo'
 
-    # Get simulation ID.
-    parser.add_argument("sim_id", help="Simulation ID to send/receive "
-                                       "data/commands")
+        # When running inside the platform, use standard MySQL port.
+        MYSQL_PORT = 3306
 
-    # Get the simulation request so we can extract the model ID.
-    parser.add_argument("sim_request", help="Request sent to start "
-                                            "simulation.")
+        # Get the gridappsd_address.
+        gridappsd_address = utils.get_gridappsd_address()
 
-    # Extract arguments.
-    args = parser.parse_args()
-    log.debug('Arguments parsed.')
+        # Initialize argument parser.
+        parser = argparse.ArgumentParser()
 
-    # Get the topic for listening to simulation output.
-    sim_out_topic = topics.fncs_output_topic(args.sim_id)
+        # Get simulation ID.
+        parser.add_argument("sim_id", help="Simulation ID to send/receive "
+                                           "data/commands")
 
-    # Get the topic for sending commands to simulation.
-    sim_in_topic = topics.fncs_input_topic(args.sim_id)
+        # Get the simulation request so we can extract the model ID.
+        parser.add_argument("sim_request", help="Request sent to start "
+                                                "simulation.")
 
-    # Get the simulation request into a dictionary.
-    sim_request = json.loads(args.sim_request.replace("\'", ""))
+        # Extract arguments.
+        args = parser.parse_args()
+        log.debug('Arguments parsed.')
 
-    # Extract the model ID. It's silly that they've labeled the model
-    # "Line_name"
-    model_id = sim_request["power_system_config"]["Line_name"]
-    log.debug('Model MRID: {}'.format(model_id))
+        # Get the topic for listening to simulation output.
+        sim_out_topic = topics.fncs_output_topic(args.sim_id)
 
-    main(log=log, sim_id=args.sim_id, model_id=model_id,
-         sim_in_topic=sim_in_topic, gridappsd_address=None,
-         sim_out_topic=sim_out_topic)
-    # main(log=log, sim_id=None, model_id=None, sim_in_topic=None,
-    #      gridappsd_address=('192.168.0.33', 61613), sim_out_topic=None)
+        # Get the topic for sending commands to simulation.
+        sim_in_topic = topics.fncs_input_topic(args.sim_id)
+
+        # Get the simulation request into a dictionary.
+        sim_request = json.loads(args.sim_request.replace("\'", ""))
+
+        # Extract the model ID. It's silly that they've labeled the model
+        # "Line_name"
+        model_id = sim_request["power_system_config"]["Line_name"]
+        log.debug('Model MRID: {}'.format(model_id))
+
+        # Extract the sim_id.
+        sim_id = args.sim_id
+
+    else:
+        # For development, hard-code this machine's internal IP.
+        MYSQL_HOST = '192.168.0.33'
+
+        # MYSQL_PORT is different when running outside the platform.
+        MYSQL_PORT = 3307
+
+        # Define where we can connect to the platform externally.
+        gridappsd_address = ('192.168.0.33', 61613)
+
+        # For now, not listening to a simulation topic.
+        sim_id = None
+        sim_out_topic = None
+        sim_in_topic = None
+
+        # Initialize GridAPPSD object so we can pull the model ID.
+        gridappsd_object = GridAPPSD(address=gridappsd_address)
+
+        # Get the id for the 8500 node feeder.
+        model_name = 'ieee8500'
+        model_id = get_model_id(gridappsd_object=gridappsd_object,
+                                model_name=model_name, log=log)
+        log.info('Retrieved model ID for {}.'.format(model_name))
+
+    # Override the MySQL host and port.
+    config['GLD-DB']['host'] = MYSQL_HOST
+    config['GLD-DB']['port'] = MYSQL_PORT
+
+    main(log=log, config=config, sim_id=sim_id, model_id=model_id,
+         sim_in_topic=sim_in_topic, gridappsd_address=gridappsd_address,
+         sim_out_topic=None)
+
+    log.info('Terminating pyvvo...')
+    sys.exit(0)

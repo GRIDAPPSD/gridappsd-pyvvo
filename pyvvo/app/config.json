@@ -62,7 +62,7 @@
   },
   "GA": {
 	"THREADS": 10,
-	"INDIVIDUALS": 30,
+	"INDIVIDUALS": 20,
 	"GENERATIONS": 3
   },
   "LOG": {

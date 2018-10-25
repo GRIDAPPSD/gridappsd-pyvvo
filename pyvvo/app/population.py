@@ -354,7 +354,7 @@ class population:
                                          reg=self.baselineData['reg'],
                                          cap=self.baselineData['cap'])
                 self.log.debug('Baseline individual data assigned.')
-                self.log.info('Baseline costs: {:.2f}'.format(
+                self.log.debug('Baseline costs:\n{}'.format(
                     json.dumps(bInd.costs, indent=4)))
 
             # Sort the individualsList by score.
@@ -386,7 +386,7 @@ class population:
                 model_count = self.crossMutateRun()
                 msg = 'Cross and mutate complete for generation {}.'.format(g)
                 self.log.info(msg)
-                msg + (' All models should now be running for generation {'
+                msg = (' All models should now be running for generation {'
                        '}.').format(g + 1)
                 self.log.info(msg)
 

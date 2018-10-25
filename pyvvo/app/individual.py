@@ -293,8 +293,8 @@ class individual:
         self.regChrom = ()
          
         # Intialize index counters.
-        s = 0;
-        e = 0;
+        s = 0
+        e = 0
         
         # Loop through the regs and create binary representation of taps.
         for r, v in self.reg.items():
@@ -346,10 +346,18 @@ class individual:
                         newState = round(random.gauss(prevState, tapSigma))
                         
                 elif (flag == 3) or (flag == 4):
+                    # Try to grab the tap position. If it doesn't work,
+                    # fall back to the prevState.
+                    try:
+                        pos = phaseData[state]
+                    except KeyError:
+                        # Fall back to prevState.
+                        pos = phaseData['prevState']
+
                     # Translate position to integer on interval [0, tb]
                     newState = \
                         gld.inverseTranslateTaps(lowerTaps=v['lower_taps'],
-                                                      pos=phaseData[state])
+                                                 pos=pos)
                         
                 elif flag == 5:
                     # Randomly draw.
@@ -517,7 +525,12 @@ class individual:
                         
                 elif (flag == 3) or (flag == 4):
                     # Use either 'prevState' or 'newState' for this state
-                    capStatus = self.cap[c]['phases'][phase][state]
+                    try:
+                        capStatus = self.cap[c]['phases'][phase][state]
+                    except KeyError:
+                        # Fall back to prevState
+                        capStatus = self.cap[c]['phases'][phase]['prevState']
+
                     capBinary = CAPSTATUS.index(capStatus)
                 elif flag == 5:
                     # Randomly determine state
