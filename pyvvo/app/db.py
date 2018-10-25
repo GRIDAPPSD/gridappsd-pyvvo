@@ -470,23 +470,28 @@ class db:
                              'V': 'AMI_average_voltage12_mag'},
                        nameCol='name', idCol='id', tCol='t', starttime=None,
                        stoptime=None):
-        """Get time, power, and voltage data for AMI.
+        """Get time, power, and voltage data_ls for AMI.
         
         WARNING: This method uses a "fetchall." If you pass a large timerange
-        and the data is granular, memory problems will ensue.
+        and the data_ls is granular, memory problems will ensue.
         """
         q = ("SELECT {T} AS T, {P} AS P, {Q} AS Q, {V} AS V "
              + "FROM {table}").format(T=tCol, P=cols['P'], Q=cols['Q'],
                                       V=cols['V'], table=table)
              
         # Add time filter, and ID filter if applicable
-        q += self.getTimeAndIDFilter(starttime=starttime,
-                                     stoptime=stoptime, table=table, 
-                                     idCol=idCol, tCol=tCol,
-                                     nameCol=nameCol, nameVal=node)
-        
+        tFilter = self.getTimeAndIDFilter(starttime=starttime,
+                                          stoptime=stoptime, table=table,
+                                          idCol=idCol, tCol=tCol,
+                                          nameCol=nameCol, nameVal=node)
+
+        if tFilter:
+            q = q + tFilter + " AND "
+        else:
+            q += " WHERE "
+
         # Add additional 'WHERE' filtering for the node
-        q += " AND {nameCol}='{node}'".format(nameCol=nameCol, node=node)
+        q += "{nameCol}='{node}'".format(nameCol=nameCol, node=node)
         # Let's order by time.
         q += " ORDER BY {tCol}".format(tCol=tCol)
         
@@ -495,7 +500,7 @@ class db:
         cnxn, cursor = self.getCnxnAndCursor()
         
         try:
-            # Use pandas to read the data
+            # Use pandas to read the data_ls
             out = pd.read_sql_query(sql=q, con=cnxn, index_col='T')
         finally:
             # Clean up.
@@ -508,13 +513,13 @@ class db:
                                           'solar_flux': 'solar_flux'},
                        nameCol='name', idCol='id', tCol='t', starttime=None,
                        stoptime=None):
-        """Get temperature and solar flux data from database.
+        """Get temperature and solar flux data_ls from database.
         
         WARNING: This method uses a "fetchall." If you pass a large timerange
-        and the data is granular, memory problems will ensue.
+        and the data_ls is granular, memory problems will ensue.
         
         TODO: this could be upgraded using GROUP BY to perform aggregation
-        before we even pull the data out. See here: 
+        before we even pull the data_ls out. See here:
         https://stackoverflow.com/questions/3086386/select-group-by-segments-of-time-10-seconds-30-seconds-etc
         """
         q = ("SELECT {T} as T, {temperature}, {solar_flux} "
@@ -536,7 +541,7 @@ class db:
         cnxn, cursor = self.getCnxnAndCursor()
         
         try:
-            # Use pandas to read the data
+            # Use pandas to read the data_ls
             out = pd.read_sql_query(sql=q, con=cnxn, index_col='T')
         finally:
             # Clean up.
@@ -551,8 +556,8 @@ class db:
         
         INPUTS:
             cursor: database cursor
-            table: table to fetch data from
-            cols: List of columns containing desired data
+            table: table to fetch data_ls from
+            cols: List of columns containing desired data_ls
             idCol: Name of the ID column
             tCol: Name of the time column
             starttime: aware datettime object, to create inclusive left hand bound 
@@ -596,7 +601,7 @@ class db:
         violation cost.
         
         TODO: for now, this simply counts violations. This could be extended to
-        add more detail, but it would also make sense to just look up the data
+        add more detail, but it would also make sense to just look up the data_ls
         in the database for more detail...
         """
         # Create the base of the query.
@@ -704,7 +709,7 @@ class db:
         
         NOTE/TODO: group_recorder will hopefully be changed in March, meaning
         we can refactor and use SQL queries to do filtering instead of pulling
-        out all the data and checking thresholds. 
+        out all the data_ls and checking thresholds. 
         
         NOTE: bounds are exclusive for determining violations, in other words,
         voltages in the set [lowerBound, upperBound] will not incur a
@@ -764,7 +769,7 @@ class db:
         NOTE/TODO: In the future, we should change the group_recorder to stop
         making multiple tables, and instead make one big table with all the
         information we need. That way, we could perform this filtering directly
-        within MySQL instead of extracting all the data and then filtering.
+        within MySQL instead of extracting all the data_ls and then filtering.
         """
         # Get the columns for the table in question. Include time.
         cols = self.getColumnNames(table=table, exceptList=[idCol,])
@@ -814,7 +819,7 @@ class db:
                 t = row[timeIndex]
                 out['detail'][t] = {'high': [], 'low':[]}
                 
-                # Loop over the data and tally violations.
+                # Loop over the data_ls and tally violations.
                 for ind in rInd:
                     val = row[ind]
                     if val < lowerBound:
@@ -912,16 +917,19 @@ class db:
         # Start by getting the time filter.
         tFilter = self.timeWhere(starttime=starttime, stoptime=stoptime,
                                  tCol=tCol)
-        
-        # If the times are ambiguous, get the ID filter.
-        ambiguous = any((helper.isAmbiguous(starttime),
-                         helper.isAmbiguous(stoptime)))
-        
-        if ambiguous:
-            idFilter = self.idFilter(tFilter=tFilter, table=table,
-                                  starttime=starttime, stoptime=stoptime,
-                                  idCol=idCol, tCol=tCol, nameCol=nameCol,
-                                  nameVal=nameVal)
+
+        if starttime and stoptime:
+            # If the times are ambiguous, get the ID filter.
+            ambiguous = any((helper.isAmbiguous(starttime),
+                             helper.isAmbiguous(stoptime)))
+
+            if ambiguous:
+                idFilter = self.idFilter(tFilter=tFilter, table=table,
+                                      starttime=starttime, stoptime=stoptime,
+                                      idCol=idCol, tCol=tCol, nameCol=nameCol,
+                                      nameVal=nameVal)
+            else:
+                idFilter = ''
         else:
             idFilter = ''
             
