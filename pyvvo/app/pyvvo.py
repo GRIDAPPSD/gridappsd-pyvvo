@@ -1,5 +1,5 @@
 """
-This is the 'main' module for the pyvvo application
+This is the 'run' module for the pyvvo application
 
 Created on Jan 25, 2018
 
@@ -13,10 +13,16 @@ import logging
 import argparse
 import sys
 import time
+import datetime
 
 # Installed
 import simplejson as json
 from simplejson.errors import JSONDecodeError
+import numpy as np
+import pandas as pd
+import dateutil
+# TODO: just using this for debugging
+import simplejson as json
 
 # pyvvo
 import sparql_queries
@@ -313,8 +319,8 @@ def command_capacitors(log, sim_id, cap_dict, gridappsd_object, sim_in_topic):
             log.info('No command necessary for capacitor {}'.format(cap_name))
 
 
-def main(log, config, sim_id, model_id, gridappsd_address, sim_in_topic,
-         sim_out_topic=None):
+def run(log, config, sim_id, model_id, gridappsd_address, sim_in_topic,
+        sim_out_topic=None):
 
     # Initialize GridAPPSD object from within the platform.
     gridappsd_object = GridAPPSD(simulation_id=sim_id,
@@ -326,8 +332,64 @@ def main(log, config, sim_id, model_id, gridappsd_address, sim_in_topic,
     #     dump_output = DumpOutput()
     #     gridappsd_object.subscribe(topic=sim_out_topic, callback=dump_output)
 
-    # Get all relevant model data.
+    # Get all relevant model data from blazegraph/CIM.
     model_data = get_all_model_data(gridappsd_object, model_id, log=log)
+
+    # Hard-code timezone for weather data.
+    # TODO: when to "un-hard code?"
+    tz = dateutil.tz.gettz('America/Denver')
+
+    # Hard-code starting date in 2013, since that's what we have weather
+    # data for.
+    # TODO: "un-hard code" when possible
+    # TODO: When UTC conversion bug is fixed with weather data, change
+    # hour from 7 to 0 below.
+    start_dt = datetime.datetime(year=2013, month=1, day=1, hour=7, minute=0,
+                                 second=0, microsecond=0, tzinfo=tz)
+    # NOTE: while this probably is slower than adding to the Unix
+    # timestamp, this gives us handy dates for logging. This probably
+    # isn't the way to go long term.
+    end_dt = start_dt + dateutil.relativedelta.relativedelta(days=14)
+
+    # Convert to Unix timestamps (which are in UTC)
+    start_ts = datetime.datetime.timestamp(start_dt)
+    end_ts = datetime.datetime.timestamp(end_dt)
+
+    # The platform uses microseconds since the epoch, rather than
+    # seconds, so be sure to convert. Also, it's taking strings, which
+    # is annoying.
+    start_time = '{:.0f}'.format(start_ts*1e6)
+    end_time = '{:.0f}'.format(end_ts*1e6)
+
+    # Pull weather data for the specified interval from the time series
+    # database, and average it over 15 minute intervals.
+    interval = 15
+    interval_unit = 'min'
+    weather = get_weather(gridappsd_object, start_time, end_time,
+                          interval=interval, interval_unit=interval_unit)
+
+    # Get strings for dates (logging only)
+    # TODO: hard-coding date formatting... yay!
+    # TODO: should probably only do this if the log level is INFO.
+    start_str = start_dt.strftime('%Y-%m-%d %H:%M:%S%z')
+    end_str = end_dt.strftime('%Y-%m-%d %H:%M:%S%z')
+
+    # Log it.
+    log_str = \
+        ('Weather data for {} through {} '.format(start_str, end_str)
+         + 'pulled and averaged over {} {} '.format(interval, interval_unit)
+         + 'intervals.')
+    log.info(log_str)
+
+    # Loop over the load measurements and pull historic data.
+
+    # Grab a single MRID for experimentation
+    meter_name = 'sx2673305b'
+    data = get_data_for_meter(gridappsd_object, sim_id,
+                              model_data['load_measurements'][meter_name])
+    log.info('Data for meter {} pulled and parsed.'.format(meter_name))
+    print('Measurements for meter {}:'.format(meter_name))
+    print(data)
 
     # Get the GridLAB-D model
     # TODO: add to the Python API.
@@ -350,6 +412,7 @@ def main(log, config, sim_id, model_id, gridappsd_address, sim_in_topic,
     model_obj = modGLM.modGLM(strModel=gld_model['message'],
                               pathModelOut='test.glm', pathModelIn='pyvvo.glm'
                               )
+    model_obj.writeModel()
     log.info('modGLM object instantiated.')
 
     # Set up the model to run.
@@ -454,9 +517,210 @@ def main(log, config, sim_id, model_id, gridappsd_address, sim_in_topic,
                            sim_in_topic=sim_in_topic)
 
 
-if __name__ == '__main__':
+def get_historic_measurements(gd, sim_id, mrid):
+    """"""
+    # TODO: Use topics from gridappsd-python when fixed.
+    t = '/queue/goss.gridappsd.process.request.data.timeseries'
+    payload = {'queryMeasurement': 'PROVEN_MEASUREMENT',
+               'queryFilter': {'hasSimulationId': sim_id,
+                               'hasMrid': mrid},
+               'responseFormat': 'JSON'}
+    sim_data = gd.get_response(topic=t, message=payload, timeout=30)
+
+    meas_df = parse_historic_measurements(sim_data)
+    pass
+
+
+def get_data_for_meter(gd, sim_id, meter_dict):
+    """NOTE: This is currently hard-coded to work for split-phase
+       residences.
+    """
+
+    # TODO: We could initialize both the query dictionary and topic
+    # outside of this function for efficiency.
+
+    # Initialize query dictionary.
+    qd = {'queryMeasurement': 'PROVEN_MEASUREMENT',
+          'queryFilter': {'hasSimulationId': sim_id, 'hasMrid': None},
+          'responseFormat': 'JSON'}
+
+    # Hard code topic.
+    # TODO: Use topic from gridappsd-python when fixed.
+    topic = '/queue/goss.gridappsd.process.request.data.timeseries'
+
+    # Loop over the various measurements in the meter dictionary.
+    # Note that measClass, measID, phases, and measType should all be
+    # the same length. See sparql_queries.parse_load_measurements_query.
+    # TODO: We aren't currently using measClass
+    # TODO: Querying the database 4x per meter is terrible... Fix this
+    # when the API supports better filtering.
+    for idx, meas_id in enumerate(meter_dict['measID']):
+
+        # Update query dictionary.
+        qd['queryFilter']['hasMrid'] = meas_id
+
+        # Query the database.
+        meas_data = gd.get_response(topic=topic, message=qd, timeout=60)
+
+        # Parse the return.
+        t, mag, angle = parse_historic_measurements(meas_data)
+
+        # Create time index.
+        t_index = pd.to_datetime(t, unit='s', utc=True, origin='unix',
+                                 box=True)
+
+        # On the first iteration, initialize the DataFrame.
+        # TODO: should this be a try-catch instead? Or initialize
+        # outside of the loop then re-index?
+        if idx == 0:
+            meas_df = pd.DataFrame(0+1j*0, columns=['voltage', 'power'],
+                                   index=t_index)
+
+        # Update the appropriate column of the DataFrame.
+        if meter_dict['measType'][idx] == 'PNV':
+            col = 'voltage'
+        elif meter_dict['measType'][idx] == 'VA':
+            col = 'power'
+        else:
+            raise UserWarning('Unexpected measurement type: {}'.format(
+                meter_dict['measType'][idx]))
+
+        # Simply sum the complex values.
+        meas_df[col] += get_complex_polar(mag, angle)
+
+    # TODO: extract V mag, P, Q
+    return meas_df
+
+
+def rad_to_deg(angle):
+    """"""
+    # TODO: this doesn't belong here
+    return angle * np.pi / 180
+
+
+def get_complex_polar(mag, angle):
+    """Angle must be in radians"""
+    # TODO: this doesn't belong here.
+    return mag * np.exp(1j * angle)
+
+
+def parse_historic_measurements(data):
+    """"""
+    t = []
+    mag = []
+    angle = []
+
+    # Loop over the "rows."
+    for row in data['data']['measurements'][0]['points']:
+        # Loop over all the measurements, since they aren't properly
+        # keyed.
+        for meas_dict in row['row']['entry']:
+            # Grab type and value of measurement.
+            meas_type = meas_dict['key']
+            meas_value = meas_dict['value']
+
+            if meas_type == 'hasMagnitude':
+                mag.append(float(meas_value))
+            elif meas_type == 'hasAngle':
+                angle.append(float(meas_value))
+            elif meas_type == 'time':
+                # TODO: should we use a float or integer? I'll use an
+                # integer since fractions of a second aren't important
+                # for this application.
+                t.append(int(meas_value))
+
+    # TODO: the database is returning time in seconds since the epoch,
+    # but our queries are in microseconds...
+    # t_index = pd.to_datetime(t, unit='s', utc=True, origin='unix', box=True)
+
+    # Convert angles to radians (cause why would we ever use degrees?)
+    angle = rad_to_deg(np.array(angle))
+
+    # Get
+    # df = pd.DataFrame({'mag': mag, 'angle': angle}, index=t_index)
+
+    return t, np.array(mag), angle
+
+
+def get_weather(gd, start_time, end_time, interval, interval_unit):
+    """temp function for getting weather data."""
+    payload = {'queryMeasurement': 'weather',
+               'queryFilter': {'startTime': start_time,
+                               'endTime': end_time},
+               'responseFormat': 'JSON'}
+    # NOTE: topics.TIMESERIES is:
+    # '/queue/goss.gridappsd.process.request.timeseries'
+    # while we need:
+    # '/queue/goss.gridappsd.process.request.data.timeseries'
+    t = '/queue/goss.gridappsd.process.request.data.timeseries'
+    weather_data = gd.get_response(topic=t, message=payload, timeout=30)
+    # Get DataFrame of weather
+    df_weather = parse_weather(weather_data)
+
+    # Resample, remove negative GHI.
+    return adjust_weather(df_weather, interval=interval, interval_unit='Min')
+
+
+def parse_weather(data):
+    """Helper to parse the ridiculous platform weather data return.
+
+    For the journal paper, we used "solar_flux" from GridLAB-D. It seems
+    simplest here to use the "global" irradiance, which is the sum of
+    direct and diffuse irradiation.
+    """
+    # Initialize dictionary (which we'll later convert to a DataFrame)
+    wd = {'temperature': [], 'ghi': []}
+    t = []
+
+    # Loop over the "rows."
+    for row in data['data']['measurements'][0]['points']:
+        # Loop over all the measurements, since they aren't properly
+        # keyed.
+        for meas_dict in row['row']['entry']:
+            # Grab type and value of measurement.
+            meas_type = meas_dict['key']
+            meas_value = meas_dict['value']
+
+            if meas_type == 'TowerDryBulbTemp':
+                wd['temperature'].append(float(meas_value))
+            elif meas_type == 'GlobalCM22':
+                wd['ghi'].append(float(meas_value))
+            elif meas_type == 'time':
+                # TODO: should we use a float or integer? I'll use an
+                # integer since fractions of a second aren't important
+                # for this application.
+                t.append(int(meas_value))
+
+    # TODO: the database is returning time in seconds since the epoch,
+    # but our queries are in microseconds...
+    t_index = pd.to_datetime(t, unit='s', utc=True, origin='unix',
+                             box=True)
+    # Convert to pandas DataFrame
+    df_weather = pd.DataFrame(wd, index=t_index)
+    return df_weather
+
+
+def adjust_weather(data, interval, interval_unit):
+    """Resample weather data, zero out negative GHI.
+
+    data should be DataFrame from parse_weather
+    interval: e.g. 15
+    interval_unit: e.g. "Min"
+    """
+    # Get 15-minute average. Since we want historic data leading up to
+    # the time in our interval, use 'left' options
+    weather = data.resample('{}{}'.format(interval, interval_unit),
+                            closed='right', label='right').mean()
+
+    # Zero-out negative GHI.
+    weather['ghi'][weather['ghi'] < 0] = 0
+
+    return weather
+
+
+def main():
     # Switch for app being managed by platform vs running outside of it.
-    IN_PLATFORM = True
+    IN_PLATFORM = False
 
     # Read configuration file.
     config = read_config('config.json')
@@ -508,17 +772,29 @@ if __name__ == '__main__':
         sim_id = args.sim_id
 
     else:
-        # For development, hard-code this machine's internal IP.
-        MYSQL_HOST = '192.168.0.33'
+        # For development, use this machine's internal IP.
+        '''
+        # The code below only works when run OUTSIDE of a container.
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        INTERNAL_IP = s.getsockname()[0]
+        s.close()
+        '''
+        INTERNAL_IP = '192.168.0.26'
+
+        MYSQL_HOST = INTERNAL_IP
 
         # MYSQL_PORT is different when running outside the platform.
         MYSQL_PORT = 3307
 
         # Define where we can connect to the platform externally.
-        gridappsd_address = ('192.168.0.33', 61613)
+        gridappsd_address = (INTERNAL_IP, 61613)
 
         # For now, not listening to a simulation topic.
-        sim_id = None
+        # NOTE: the sim_id below is for an offline simulation, so I
+        # can grab timeseries information.
+        sim_id = "293975150"
         sim_out_topic = None
         sim_in_topic = None
 
@@ -535,9 +811,28 @@ if __name__ == '__main__':
     config['GLD-DB']['host'] = MYSQL_HOST
     config['GLD-DB']['port'] = MYSQL_PORT
 
-    main(log=log, config=config, sim_id=sim_id, model_id=model_id,
-         sim_in_topic=sim_in_topic, gridappsd_address=gridappsd_address,
-         sim_out_topic=None)
+    run(log=log, config=config, sim_id=sim_id, model_id=model_id,
+        sim_in_topic=sim_in_topic, gridappsd_address=gridappsd_address,
+        sim_out_topic=None)
+
+    # Initialize GridAPPSD object.
+    gridappsd_object = GridAPPSD(simulation_id=sim_id,
+                                 address=gridappsd_address,
+                                 username=utils.get_gridappsd_user(),
+                                 password=utils.get_gridappsd_pass())
+
+    # Grab measurement information
+    load_meas = \
+        query_and_parse(
+            gridappsd_object,
+            query_string=sparql_queries.LOAD_MEASUREMENTS_QUERY.format(fdrid=model_id),
+            parse_function=sparql_queries.parse_load_measurements_query,
+            log_string='Load Measurement', log=log
+        )
 
     log.info('Terminating pyvvo...')
     sys.exit(0)
+
+
+if __name__ == '__main__':
+    main()
