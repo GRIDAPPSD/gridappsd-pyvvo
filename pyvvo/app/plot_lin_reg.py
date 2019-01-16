@@ -45,6 +45,20 @@ def coefficient_of_determination(actual, predicted):
     return 1 - ss_res / ss_tot
 '''
 
+def get_p_for_node(df, node):
+    # Filter.
+    node_df = df[df['node'] == node]
+    # Reduce number of data_ls points for plotting.
+    num_hr = int(np.floor(node_df.shape[0] / 4))
+    rem = node_df.shape[0] % 4
+    hourly = np.array([True, False, False, False] * num_hr
+                      + [False] * rem)
+
+    p_act = node_df['P_actual'].values
+    p_est = node_df['P_estimate'].values
+
+    return p_act, p_est, hourly
+
 
 if __name__ == '__main__':
     nodes = ['tpm0_R2-12-47-2_tm_1_R2-12-47-2_tn_193',
@@ -65,6 +79,8 @@ if __name__ == '__main__':
              'tpm0_R2-12-47-2_tm_168_R2-12-47-2_tn_360'
              ]
     # We only care about meter 13.
+    node = nodes[12]
+    node_idx = nodes.index(node)
     nodes2 = [nodes[12]]
 
     # Files.
@@ -73,57 +89,79 @@ if __name__ == '__main__':
 
     # Directories
     dirs = ['scatter', 'scatter_pq_avg']
+
     # Read data_ls for no pq
+    df1 = read_file(f=files[0])
+    df2 = read_file(f=files[1])
 
-    for idx in range(len(files)):
-        df = read_file(f=files[idx])
+    # Get real power data
+    p_act1, p_est1, hourly1 = get_p_for_node(df1, node=node)
+    p_act2, p_est2, hourly2 = get_p_for_node(df2, node=node)
 
-        for node in nodes2:
-            node_idx = nodes.index(node)
+    # Define figure size, get axes.
+    figsize = (mpl.rcParams['figure.figsize'][0],
+               mpl.rcParams['figure.figsize'][1])
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, sharex=True)
 
-            # Filter.
-            node_df = df[df['node'] == node]
-            # Reduce number of data_ls points for plotting.
-            num_hr = int(np.floor(node_df.shape[0] / 4))
-            rem = node_df.shape[0] % 4
-            hourly = np.array([True, False, False, False] * num_hr
-                              + [False] * rem)
+    # Scatter plot.
+    ax1.plot(p_act1[hourly1], p_est1[hourly1], marker='o',
+             markerfacecolor='None', color='#1f77b4', linestyle='None')
+    ax2.plot(p_act2[hourly2], p_est2[hourly2], marker='o',
+             markerfacecolor='None', color='#1f77b4', linestyle='None')
 
-            p_act = node_df['P_actual'].values
-            p_est = node_df['P_estimate'].values
+    # Labels.
+    ax1.set_ylabel('Predicted P (W)')
+    ax2.set_ylabel('Predicted P (W)')
+    ax2.set_xlabel('Actual P (W)')
 
-            figsize = (mpl.rcParams['figure.figsize'][0],
-                       mpl.rcParams['figure.figsize'][1] * 0.75)
-            fig, ax = plt.subplots(1, 1, figsize=figsize)
+    # Shorten ticks for axis 1.
+    ax1.tick_params(axis='x', length=2)
 
-            # Scatter plot.
-            ax.plot(p_act[hourly], p_est[hourly], marker='o',
-                    markerfacecolor='None', color='#1f77b4', linestyle='None')
+    # Titles.
+    ax1.set_title('(a)', pad=2.2)
+    ax2.set_title('(b)', pad=2.2)
 
-            ax.set_ylabel('Predicted Active Power (W)')
-            ax.set_xlabel('Actual Active Power (W)')
+    # Adjust y limits to match for both.
+    # HARD-CODING:
+    lb = 0
+    ub = 6400
+    ax1.set_yticks(np.arange(lb, ub, 2000))
+    ax1.set_ylim((lb, ub))
+    ax2.set_yticks(np.arange(lb, ub, 2000))
+    ax2.set_ylim((lb, ub))
+    # ax1.set_yticklabels(y_labels)
 
-            # Fit line
-            coeff = np.polyfit(p_act, p_est, deg=1)
-            p = np.poly1d(coeff)
+    # Fit lines.
+    coeff1 = np.polyfit(p_act1, p_est1, deg=1)
+    p1 = np.poly1d(coeff1)
+    coeff2 = np.polyfit(p_act2, p_est2, deg=1)
+    p2 = np.poly1d(coeff2)
 
-            # plot.
-            x_lim = np.array(ax.get_xlim())
-            y_val = p(x_lim)
-            ax.plot(x_lim, y_val, marker='None', color='#ff7f0e',
-                    linewidth=0.75)
+    # Plot fit lines.
+    x_lim1 = np.array(ax1.get_xlim())
+    y_val1 = p1(x_lim1)
+    ax1.plot(x_lim1, y_val1, marker='None', color='#ff7f0e',
+             linewidth=0.75)
 
-            # Compute coefficient of determination from line.
-            y_cod = p(p_act)
-            cod = r2_score(p_est, y_cod)
+    x_lim2 = np.array(ax2.get_xlim())
+    y_val2 = p2(x_lim2)
+    ax2.plot(x_lim2, y_val2, marker='None', color='#ff7f0e',
+             linewidth=0.75)
 
-            # ax.set_title('COD: {:.2f}'.format(cod))
-            # print('COD: {:.2f}'.format(cod))
+    # Compute coefficient of determination from line.
+    y_cod1 = p1(p_act1)
+    cod1 = r2_score(p_est1, y_cod1)
+    y_cod2 = p2(p_act2)
+    cod2 = r2_score(p_est2, y_cod2)
 
-            # Tighten and save.
-            plt.tight_layout(pad=0.07, h_pad=0, w_pad=0)
-            n = 'meter_{}_scatter'.format(node_idx+1)
-            fig.savefig(osp(dirs[idx], n + '.png'))
-            fig.savefig(osp(dirs[idx], n + '.eps'), type='eps', dpi=1000)
-            plt.close(fig)
+    # ax.set_title('COD: {:.2f}'.format(cod))
+    print('COD1: {:.2f}'.format(cod1))
+    print('COD2: {:.2f}'.format(cod2))
+
+    # Tighten and save.
+    plt.tight_layout(pad=0.05, h_pad=0.1, w_pad=0, rect=(0, 0, 1, 1))
+    n = 'meter_{}_scatter'.format(node_idx+1)
+    fig.savefig(n + '.png')
+    fig.savefig(n + '.eps', type='eps', dpi=1000)
+    plt.close(fig)
 

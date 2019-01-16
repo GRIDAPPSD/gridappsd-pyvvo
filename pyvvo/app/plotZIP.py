@@ -82,6 +82,7 @@ def read_indra_data(meter_num):
                              periods=pq.shape[0], tz='America/Los_Angeles')
     return pq
 
+
 def plot_meter_1(data_ls, meter_name):
     """Hard-coded helper for plotting node 1 for the journal paper."""
     # Get meter 1 data.

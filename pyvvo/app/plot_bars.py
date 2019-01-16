@@ -25,14 +25,20 @@ if __name__ == '__main__':
     # Read metric files.
     metrics_dl = pd.read_csv('metrics_dl.csv')
     metrics_ls = pd.read_csv('metrics_ls.csv')
+    metrics_static = pd.read_csv('metrics_static.csv')
 
     # Massage into different format. This isn't efficient, it's just a short
     # way to adapt this script to a new method of data_ls.
-    mbe = pd.DataFrame({'ls': metrics_ls['MBE'], 'dl': metrics_dl['MBE']})
-    mae = pd.DataFrame({'ls': metrics_ls['MAE'], 'dl': metrics_dl['MAE']})
-    rmqe = pd.DataFrame({'ls': metrics_ls['RMQE'], 'dl': metrics_dl['RMQE']})
-    rmse = pd.DataFrame({'ls': metrics_ls['RMSE'], 'dl': metrics_dl['RMSE']})
-    acc = pd.DataFrame({'ls': metrics_ls['Acc'], 'dl': metrics_dl['Acc']})
+    mbe = pd.DataFrame({'ls': metrics_ls['MBE'], 'dl': metrics_dl['MBE'],
+                        'static': metrics_static['MBE']})
+    mae = pd.DataFrame({'ls': metrics_ls['MAE'], 'dl': metrics_dl['MAE'],
+                        'static': metrics_static['MAE']})
+    rmqe = pd.DataFrame({'ls': metrics_ls['RMQE'], 'dl': metrics_dl['RMQE'],
+                         'static': metrics_static['RMQE']})
+    rmse = pd.DataFrame({'ls': metrics_ls['RMSE'], 'dl': metrics_dl['RMSE'],
+                         'static': metrics_static['RMSE']})
+    acc = pd.DataFrame({'ls': metrics_ls['Acc'], 'dl': metrics_dl['Acc'],
+                        'static': metrics_static['Acc']})
 
     # We'll have double-sized figure.
     figsize = (mpl.rcParams['figure.figsize'][0],
@@ -41,6 +47,7 @@ if __name__ == '__main__':
     # Define colors.
     ls_color = '#1f77b4'
     dl_color = '#ff7f0e'
+    static_color = '#2ca02c'
 
     # Plot.
     fig, (ax_mbe, ax_mae, ax_rmqe, ax_rmse, ax_acc) = \
@@ -50,7 +57,7 @@ if __name__ == '__main__':
     index = np.arange(rmse.shape[0])
     x_labels = [str(i + 1) for i in index]
     # Set bar width.
-    bar_width = 0.3
+    bar_width = 0.3 * (2/3)
 
     # Y-ticks
     y_ticks = np.arange(0, 1.2, 0.2)
@@ -67,7 +74,7 @@ if __name__ == '__main__':
     # Plot.
     for k in d:
         # Setup axis.
-        k['ax'].set_xticks(index + bar_width/2)
+        k['ax'].set_xticks(index + bar_width/3)
         k['ax'].set_xticklabels(x_labels)
         k['ax'].grid(which='both', axis='y')
         k['ax'].set_axisbelow(True)
@@ -79,9 +86,9 @@ if __name__ == '__main__':
             k['ax'].set_yticklabels(y_labels)
         elif k['y_label'] == 'RMSE':
             # HARD-CODE for RMSE. Just keep it simple.
-            rmse_range = np.arange(0, 1750, 250)
+            rmse_range = np.arange(0, 2001, 250)
             k['ax'].set_yticks(rmse_range)
-            k['ax'].set_ylim((0, 1500))
+            k['ax'].set_ylim((0, 2000))
             k['ax'].set_yticklabels(['{:.0f}'.format(i) for i in rmse_range])
         elif k['y_label'] == 'RMQE':
             # HARD-CODE
@@ -92,17 +99,17 @@ if __name__ == '__main__':
             k['ax'].set_yticklabels(['{:.0f}'.format(i) for i in rmqe_range])
         elif k['y_label'] == 'MAE':
             # HARD-CODE
-            # Max is ~600
-            mae_range = np.arange(0, 601, 100)
+            # Max is ~1100
+            mae_range = np.arange(0, 1201, 200)
             k['ax'].set_yticks(mae_range)
-            k['ax'].set_ylim((0, 600))
+            k['ax'].set_ylim((0, 1100))
             k['ax'].set_yticklabels(['{:.0f}'.format(i) for i in mae_range])
         elif k['y_label'] == 'MBE':
             # HARD-CODE
-            # Let's go -100, 50
-            mbe_range = np.arange(-100, 51, 25)
+            # Let's go -200, 450
+            mbe_range = np.arange(-200, 451, 100)
             k['ax'].set_yticks(mbe_range)
-            k['ax'].set_ylim((-100, 50))
+            k['ax'].set_ylim((-200, 450))
             k['ax'].set_yticklabels(['{:.0f}'.format(i) for i in mbe_range])
 
         # Plot.
@@ -112,6 +119,10 @@ if __name__ == '__main__':
         rects_dl = k['ax'].bar(index + bar_width, k['data_ls']['dl'], bar_width,
                                color=dl_color, label='Deep Learning',
                                hatch='xxx')
+        rects_static = k['ax'].bar(index + 2*bar_width, k['data_ls']['static'],
+                                   bar_width,
+                                   color=static_color, label='Static ZIP',
+                                   hatch='***')
 
         k['ax'].set_title(k['title'], loc='left')
         k['ax'].set_ylabel(k['y_label'])
@@ -121,8 +132,9 @@ if __name__ == '__main__':
     #plt.tight_layout(rect=(0, 0, 1, 0.8), h_pad=.1, w_pad=.2)
 
     # Add legend to the figure.
-    plt.figlegend((rects_ls, rects_dl), ('KMLS', 'Deep Learning'),
-                  loc='upper center', ncol=2)
+    plt.figlegend((rects_ls, rects_dl, rects_static),
+                  ('KMLS', 'Deep Learning', 'Static ZIP'),
+                  loc='upper center', ncol=3)
 
     # Tighten layout. Use rect to bring subplots down to make room for the
     # legend.
